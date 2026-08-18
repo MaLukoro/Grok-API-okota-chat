@@ -3,7 +3,6 @@
 Grok API 専用の、iPhone 単体で動く長編チャット PWA。  
 Local LLM Studio のログ JSON と行き来できる。PC でサーバーを常駐させる必要はない。
 
-場所: `C:\Users\kyuri\Desktop\grok-kotatsu`
 
 ## できること（MVP）
 
@@ -54,13 +53,6 @@ GitHub Pages 上で接続テストが失敗するなら、ブラウザが `api.x
 3. 出てきた `https://xxxx.workers.dev/v1` を ⚙ のプロキシ URL に入れる
 
 ### PC で中身を見るだけ
-
-### PC で中身を見るだけ
-
-```bat
-cd C:\Users\kyuri\Desktop\grok-kotatsu
-python preview.py
-```
 
 ブラウザで http://127.0.0.1:8765/  
 この preview だけがローカル用。本番の iPhone 運用には使わない。
