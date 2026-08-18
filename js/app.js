@@ -33,7 +33,7 @@ import {
   saveFile,
   saveProject,
 } from "./db.js";
-import { chatStream, listModels } from "./xai.js";
+import { chatStream, listModels, sanitizeApiKey } from "./xai.js";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
@@ -1085,20 +1085,24 @@ function bind() {
   });
 
   $("#btn-save-key").addEventListener("click", async () => {
+    const apiKey = sanitizeApiKey($("#inp-apikey").value);
     persistSettings({
-      apiKey: $("#inp-apikey").value.trim(),
+      apiKey,
       proxyBase: $("#inp-proxy").value.trim(),
     });
-    toast("キー保存した", "ok");
+    $("#inp-apikey").value = apiKey;
+    toast(apiKey ? "キー保存した" : "キーが空だよ", apiKey ? "ok" : "error");
     await refreshModels();
   });
   $("#btn-probe").addEventListener("click", async () => {
+    const apiKey = sanitizeApiKey($("#inp-apikey").value);
     persistSettings({
-      apiKey: $("#inp-apikey").value.trim(),
+      apiKey,
       proxyBase: $("#inp-proxy").value.trim(),
     });
+    $("#inp-apikey").value = apiKey;
     try {
-      const models = await listModels(settings());
+      const models = await listModels(settings(), { allowFallback: false });
       state.models = models;
       fillModelSelect();
       toast(`つながった · ${models.length} models`, "ok");

@@ -19,8 +19,15 @@ export function resolveApiBase(settings) {
   return "https://api.x.ai/v1";
 }
 
+export function sanitizeApiKey(raw) {
+  return String(raw || "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
 export function authHeaders(settings, extra = {}) {
-  const key = (settings.apiKey || "").trim();
+  const key = sanitizeApiKey(settings.apiKey);
   if (!key) throw new Error("xAI APIキーが未設定だよ。右の設定から入れてくれ。");
   return {
     Authorization: `Bearer ${key}`,
@@ -44,7 +51,7 @@ async function readError(res) {
   return typeof detail === "string" ? detail : JSON.stringify(detail);
 }
 
-export async function listModels(settings) {
+export async function listModels(settings, { allowFallback = true } = {}) {
   try {
     const res = await fetch(`${resolveApiBase(settings)}/models`, {
       headers: authHeaders(settings),
@@ -60,6 +67,7 @@ export async function listModels(settings) {
     const known = new Map(FALLBACK_MODELS.map((m) => [m.id, m]));
     return grok.map((id) => known.get(id) || { id, label: id, hint: "" });
   } catch (e) {
+    if (!allowFallback) throw e;
     console.warn("models fallback", e);
     return FALLBACK_MODELS;
   }

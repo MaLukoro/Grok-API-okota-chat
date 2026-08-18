@@ -1,14 +1,14 @@
-const CACHE = "kotatsu-v4";
+const CACHE = "kotatsu-v5";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=4",
+  "./styles.css?v=5",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/apple-touch-icon.png",
   "./icons/favicon-64.png",
-  "./js/app.js?v=4",
+  "./js/app.js?v=5",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
