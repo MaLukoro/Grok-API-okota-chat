@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=5" />
+  <link rel="stylesheet" href="./styles.css?v=6" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -233,6 +233,33 @@
       </div>
 
       <div class="panel">
+        <div class="panel-title">Google ドライブ</div>
+        <p class="help">会話の作業場は端末。ドライブはコピー先。iPhone と PC で同じログを行き来できる。</p>
+        <label class="field">
+          <span>OAuth クライアントID</span>
+          <input id="inp-gclient" type="text" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com" />
+        </label>
+        <div class="row-btns">
+          <button id="btn-g-save" class="btn ghost sm" type="button">ID保存</button>
+          <button id="btn-g-login" class="btn primary sm" type="button">Googleでログイン</button>
+          <button id="btn-g-logout" class="btn ghost sm" type="button">ログアウト</button>
+        </div>
+        <div id="gdrive-status" class="muted sm">未ログイン</div>
+        <div class="row-btns">
+          <button id="btn-g-up" class="btn primary sm" type="button">⬆ ドライブへ保存</button>
+          <button id="btn-g-down" class="btn ghost sm" type="button">⬇ ドライブから復元</button>
+        </div>
+        <label class="check">
+          <input id="chk-g-auto" type="checkbox" />
+          <span>会話保存のあと、自動でドライブへも書く</span>
+        </label>
+        <details class="sql-help">
+          <summary>初回だけ：Google Cloud の設定</summary>
+          <pre id="gdrive-help" class="sql-box"></pre>
+        </details>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">クラウドバックアップ</div>
         <label class="field">
           <span>Supabase URL</span>
@@ -262,11 +289,11 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script type="module" src="./js/app.js?v=5"></script>
+  <script type="module" src="./js/app.js?v=6"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=5").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=6").catch(() => {});
       });
     }
   </script>

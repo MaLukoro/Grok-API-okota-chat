@@ -38,6 +38,9 @@ const DEFAULTS = {
   supabaseUrl: "",
   supabaseKey: "",
   backupSlot: "kotatsu-main",
+  googleClientId: "",
+  googleAutoBackup: false,
+  googleLastBackup: "",
 };
 
 export function loadSettings() {

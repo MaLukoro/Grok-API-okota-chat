@@ -1,14 +1,14 @@
-const CACHE = "kotatsu-v5";
+const CACHE = "kotatsu-v6";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=5",
+  "./styles.css?v=6",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/apple-touch-icon.png",
   "./icons/favicon-64.png",
-  "./js/app.js?v=5",
+  "./js/app.js?v=6",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
@@ -17,6 +17,7 @@ const ASSETS = [
   "./js/importChat.js",
   "./js/tts.js",
   "./js/cloud.js",
+  "./js/drive.js",
 ];
 
 self.addEventListener("install", (event) => {

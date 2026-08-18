@@ -38,6 +38,16 @@ import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
+import {
+  authorizedOrigin,
+  clearToken,
+  consumeOAuthRedirect,
+  downloadFromDrive,
+  driveSetupHelp,
+  isDriveLoggedIn,
+  startGoogleLogin,
+  uploadToDrive,
+} from "./drive.js";
 
 const state = {
   settings: loadSettings(),
@@ -88,9 +98,46 @@ function syncSettingsUi() {
   $("#inp-sb-key").value = s.supabaseKey || "";
   $("#inp-sb-slot").value = s.backupSlot || "kotatsu-main";
   $("#sql-box").textContent = supabaseSql();
+  $("#inp-gclient").value = s.googleClientId || "";
+  $("#chk-g-auto").checked = !!s.googleAutoBackup;
+  if ($("#gdrive-help")) $("#gdrive-help").textContent = driveSetupHelp();
+  updateDriveStatus();
   fillVoiceSelect();
   fillModelSelect();
   updateGenHint();
+}
+
+function updateDriveStatus() {
+  const el = $("#gdrive-status");
+  if (!el) return;
+  const s = settings();
+  if (!s.googleClientId) {
+    el.textContent = "クライアントID未設定";
+    return;
+  }
+  if (!isDriveLoggedIn()) {
+    el.textContent = "未ログイン（上のボタンから Google へ）";
+    return;
+  }
+  const last = s.googleLastBackup
+    ? ` · 最終 ${new Date(s.googleLastBackup).toLocaleString("ja-JP")}`
+    : "";
+  el.textContent = `ログイン中 · 保存先 ${authorizedOrigin() === location.origin ? "GrokKotatsu/" : ""}${s.backupSlot || "kotatsu-main"}.json${last}`;
+}
+
+let driveBackupTimer = null;
+function scheduleDriveBackup() {
+  if (!settings().googleAutoBackup) return;
+  if (!isDriveLoggedIn()) return;
+  clearTimeout(driveBackupTimer);
+  driveBackupTimer = setTimeout(async () => {
+    try {
+      await uploadToDrive(settings());
+      persistSettings({ googleLastBackup: new Date().toISOString() });
+    } catch (e) {
+      console.warn("auto drive backup", e);
+    }
+  }, 8000);
 }
 
 function fillVoiceSelect() {
@@ -367,6 +414,7 @@ async function persistCurrent() {
   if (!state.current) return;
   state.current.updated_at = nowSec();
   state.current = await saveChat(state.current);
+  scheduleDriveBackup();
 }
 
 // ── RAG sources ──────────────────────────────────────────────
@@ -1148,7 +1196,58 @@ function bind() {
       supabaseUrl: $("#inp-sb-url").value.trim(),
       supabaseKey: $("#inp-sb-key").value.trim(),
       backupSlot: $("#inp-sb-slot").value.trim() || "kotatsu-main",
+      googleClientId: $("#inp-gclient").value.trim(),
+      googleAutoBackup: $("#chk-g-auto").checked,
     });
+
+  $("#btn-g-save").addEventListener("click", () => {
+    saveCloudFields();
+    toast("クライアントID保存した", "ok");
+  });
+  $("#btn-g-login").addEventListener("click", () => {
+    saveCloudFields();
+    try {
+      startGoogleLogin(settings().googleClientId);
+    } catch (e) {
+      toast(String(e.message || e), "error");
+    }
+  });
+  $("#btn-g-logout").addEventListener("click", () => {
+    clearToken();
+    persistSettings({ googleAutoBackup: false });
+    $("#chk-g-auto").checked = false;
+    toast("Google から出た", "ok");
+  });
+  $("#chk-g-auto").addEventListener("change", () => {
+    persistSettings({ googleAutoBackup: $("#chk-g-auto").checked });
+    if ($("#chk-g-auto").checked && !isDriveLoggedIn()) {
+      toast("先に Google ログインしてくれ", "error");
+      $("#chk-g-auto").checked = false;
+      persistSettings({ googleAutoBackup: false });
+    }
+  });
+  $("#btn-g-up").addEventListener("click", async () => {
+    saveCloudFields();
+    try {
+      const r = await uploadToDrive(settings());
+      persistSettings({ googleLastBackup: new Date().toISOString() });
+      toast(`ドライブへ保存: ${r.name} · 会話${r.chats}`, "ok");
+    } catch (e) {
+      toast(String(e.message || e), "error");
+    }
+  });
+  $("#btn-g-down").addEventListener("click", async () => {
+    saveCloudFields();
+    if (!confirm("ドライブのパックをこの端末に取り込む。同じ id は上書き。いい？")) return;
+    try {
+      const r = await downloadFromDrive(settings(), { merge: true });
+      await refreshLists();
+      renderMessages();
+      toast(`ドライブから復元: 会話${r.chats} / 案件${r.projects}`, "ok");
+    } catch (e) {
+      toast(String(e.message || e), "error");
+    }
+  });
   $("#btn-cloud-up").addEventListener("click", async () => {
     saveCloudFields();
     try {
@@ -1194,8 +1293,11 @@ function bind() {
 
 async function init() {
   setupViewport();
+  const oauth = consumeOAuthRedirect();
   syncSettingsUi();
   bind();
+  if (oauth.handled && oauth.ok) toast("Google ログインできた", "ok");
+  if (oauth.handled && oauth.error) toast(`Google: ${oauth.error}`, "error");
   await refreshLists();
   renderMessages();
   await refreshModels();
