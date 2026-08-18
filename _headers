@@ -1,0 +1,10 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+/js/*
+  Content-Type: application/javascript; charset=utf-8
+  Cache-Control: no-cache
+
+/sw.js
+  Cache-Control: no-cache

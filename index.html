@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#140e0c" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Kotatsu" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="description" content="Grok Kotatsu — おこた専用・Grok API 長編チャット" />
+  <title>Grok Kotatsu</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="./styles.css?v=4" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <div id="backdrop" hidden></div>
+
+    <aside class="sidebar left" id="sidebar-left">
+      <div class="brand">
+        <img class="logo" src="./icons/icon-192.png" width="40" height="40" alt="" />
+        <div>
+          <div class="brand-title">Grok Kotatsu</div>
+          <div class="brand-sub">おこた専用 · Grok API</div>
+        </div>
+        <button type="button" class="btn ghost sm mobile-only drawer-close" data-close="left" aria-label="閉じる">✕</button>
+      </div>
+
+      <div class="chat-top-actions">
+        <button id="btn-new-chat" class="btn primary sm chat-top-main" type="button">＋ チャット</button>
+        <button id="btn-import-chat" class="btn ghost sm" type="button" title="JSONから続き再開">📂 再開</button>
+        <button id="btn-export-chat" class="btn ghost sm" type="button" title="この会話をJSONで書き出し">⬇</button>
+        <input id="import-file" type="file" accept=".json,application/json" hidden />
+      </div>
+
+      <div class="section-label section-label-row">
+        <span>プロジェクト</span>
+        <button id="btn-new-project" class="btn ghost xs" type="button" title="新規プロジェクト">＋</button>
+      </div>
+      <div id="project-nav" class="project-nav"></div>
+
+      <div id="project-workspace" class="project-workspace" hidden>
+        <div class="workspace-head">
+          <div>
+            <div id="ws-name" class="ws-name">プロジェクト</div>
+            <button id="btn-edit-project" class="linkish" type="button">名前 / プロンプト</button>
+          </div>
+          <div class="ws-head-actions">
+            <button id="btn-delete-project" class="btn ghost xs" type="button" title="プロジェクト削除">🗑</button>
+            <button id="btn-leave-project" class="btn danger-ghost sm" type="button">✕ 閉じる</button>
+          </div>
+        </div>
+        <button id="btn-new-thread" class="btn ghost sm ws-new-thread" type="button">＋ スレッド</button>
+        <details class="project-section" id="sec-threads" open>
+          <summary>スレッド</summary>
+          <div id="thread-list" class="session-list"></div>
+        </details>
+        <details class="project-section" id="sec-files" open>
+          <summary>資料（RAG）</summary>
+          <div class="file-drop" id="file-drop">
+            <button id="btn-add-files" class="btn ghost sm" type="button">＋ 資料を追加</button>
+            <input id="project-file-input" type="file" multiple hidden accept=".txt,.md,.markdown,.json,.jsonl,.csv,.log,.yml,.yaml,.html,.css,.js,.ts,.py" />
+            <div class="file-drop-hint">.md / .txt / .json をドロップ</div>
+          </div>
+          <div id="file-list" class="file-list"></div>
+        </details>
+      </div>
+
+      <div class="section-label" id="global-chats-label">チャット</div>
+      <div id="session-list" class="session-list"></div>
+    </aside>
+
+    <main id="main">
+      <header class="topbar">
+        <button type="button" id="btn-open-left" class="btn ghost sm mobile-only" aria-label="メニュー">☰</button>
+        <div class="topbar-title">
+          <div id="chat-title">Grok Kotatsu</div>
+          <div id="chat-sub" class="topbar-sub">布団の中から、続きを。</div>
+        </div>
+        <button type="button" id="btn-find" class="btn ghost sm" title="この会話を検索">⌕</button>
+        <button type="button" id="btn-speak-last" class="btn ghost sm" title="最後の返答をRexで読む">🔊</button>
+        <button type="button" id="btn-stop-speak" class="btn ghost sm" hidden title="読み上げ停止">⏹</button>
+        <button type="button" id="btn-open-right" class="btn ghost sm" aria-label="設定">⚙</button>
+      </header>
+
+      <div id="find-bar" class="find-bar" hidden>
+        <input id="find-input" type="search" placeholder="この会話を検索…" enterkeyhint="search" />
+        <span id="find-count" class="find-count"></span>
+        <button type="button" id="btn-find-close" class="btn ghost xs">閉じる</button>
+      </div>
+
+      <div id="messages" class="messages">
+        <div id="empty-state" class="empty-state">
+          <img src="./icons/icon-192.png" width="72" height="72" alt="" class="empty-icon" />
+          <h1>おこた、あいてるよ</h1>
+          <p>Grok API だけで動く長編チャット。PCのサーバーはいらない。<br />過去ログの JSON を落とせば、昨日の続きから入れる。</p>
+          <div class="empty-actions">
+            <button id="btn-empty-new" class="btn primary" type="button">新しいチャット</button>
+            <button id="btn-empty-import" class="btn ghost" type="button">📂 JSONから再開</button>
+            <button id="btn-empty-settings" class="btn ghost" type="button">APIキーを入れる</button>
+          </div>
+          <div class="hint-row">
+            <span class="chip">Streaming</span>
+            <span class="chip">Projects + RAG</span>
+            <span class="chip">Rex Voice</span>
+            <span class="chip">PWA</span>
+          </div>
+        </div>
+      </div>
+
+      <footer class="composer-wrap">
+        <div id="rag-source-bar" class="rag-source-bar" hidden>
+          <button id="btn-rag-sources" class="btn ghost sm btn-rag-sources" type="button" title="この送信で参照するプロジェクト資料を選ぶ">📁 参照</button>
+          <span id="rag-source-summary" class="rag-source-summary"></span>
+          <div id="rag-source-popover" class="rag-source-popover" hidden>
+            <div class="rag-source-pop-head">
+              <span>参照する資料</span>
+              <div class="rag-source-pop-actions">
+                <button type="button" class="btn ghost xs" id="btn-rag-all">すべて</button>
+                <button type="button" class="btn ghost xs" id="btn-rag-none">なし</button>
+                <button type="button" class="btn ghost xs" id="btn-rag-close">閉じる</button>
+              </div>
+            </div>
+            <div id="rag-source-list" class="rag-source-list"></div>
+            <div class="rag-source-pop-foot">空＝RAGオフ / 全選択＝全資料</div>
+          </div>
+        </div>
+        <div class="composer" id="composer-drop">
+          <textarea id="input" rows="1" enterkeyhint="enter" placeholder="メッセージを入力… JSONドロップで再開もできる"></textarea>
+          <div class="composer-actions">
+            <button
+              id="btn-regen-last"
+              class="btn ghost sm"
+              type="button"
+              title="最後の返答を再生成"
+            >🔄 再生成</button>
+            <button id="btn-stop" class="btn danger sm" type="button" hidden>停止</button>
+            <button id="btn-send" class="btn primary" type="button">送信</button>
+          </div>
+        </div>
+        <div class="composer-meta">
+          <span id="gen-hint"></span>
+          <span id="rag-hint" class="rag-hint" hidden></span>
+        </div>
+      </footer>
+    </main>
+
+    <aside class="sidebar right" id="sidebar-right">
+      <div class="mobile-drawer-head">
+        <span class="mobile-drawer-title">設定</span>
+        <button type="button" class="btn ghost sm drawer-close" data-close="right" aria-label="閉じる">✕</button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">xAI API</div>
+        <label class="field">
+          <span>APIキー</span>
+          <input id="inp-apikey" type="password" autocomplete="off" placeholder="xai-..." />
+        </label>
+        <div class="row-btns">
+          <button id="btn-save-key" class="btn primary sm" type="button">保存</button>
+          <button id="btn-probe" class="btn ghost sm" type="button">接続テスト</button>
+        </div>
+        <div id="key-hint" class="muted sm"></div>
+        <label class="field">
+          <span>プロキシURL（任意）</span>
+          <input id="inp-proxy" type="url" placeholder="空なら api.x.ai 直結（GitHub Pages向け）" />
+        </label>
+        <p class="help">GitHub Pages は空でOK。接続テストが CORS で落ちたときだけ、Worker の URL を入れてくれ。</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">モデル / 生成</div>
+        <label class="field">
+          <span>モデル</span>
+          <select id="sel-model"></select>
+        </label>
+        <label class="field range">
+          <span>Temperature <b id="val-temp">0.8</b></span>
+          <input id="rng-temp" type="range" min="0" max="2" step="0.05" />
+        </label>
+        <label class="field range">
+          <span>Max tokens <b id="val-max">4096</b></span>
+          <input id="rng-max" type="range" min="256" max="16384" step="256" />
+        </label>
+        <label class="check">
+          <input id="chk-websearch" type="checkbox" />
+          <span>Grok Web検索を使う</span>
+        </label>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">System Prompt</div>
+        <textarea id="inp-system" rows="7" placeholder="この端末の既定プロンプト"></textarea>
+        <button id="btn-save-system" class="btn ghost sm" type="button">既定として保存</button>
+        <p class="help">新しいチャットに使われる。開いてる会話のプロンプトは会話側に保存される。</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">RAG</div>
+        <label class="field range">
+          <span>参照チャンク数 <b id="val-ragk">5</b></span>
+          <input id="rng-ragk" type="range" min="1" max="8" step="1" />
+        </label>
+        <label class="field range">
+          <span>注入テキスト上限 <b id="val-ragm">6000</b></span>
+          <input id="rng-ragm" type="range" min="400" max="16000" step="200" />
+        </label>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Rex ボイス</div>
+        <label class="field">
+          <span>声</span>
+          <select id="sel-voice"></select>
+        </label>
+        <label class="field range">
+          <span>速度 <b id="val-speed">1.0</b></span>
+          <input id="rng-speed" type="range" min="0.7" max="1.4" step="0.05" />
+        </label>
+        <label class="check">
+          <input id="chk-autospeak" type="checkbox" />
+          <span>返答を自動で読む</span>
+        </label>
+        <button id="btn-test-voice" class="btn ghost sm" type="button">Rexでテスト</button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">クラウドバックアップ</div>
+        <label class="field">
+          <span>Supabase URL</span>
+          <input id="inp-sb-url" type="url" placeholder="https://xxxx.supabase.co" />
+        </label>
+        <label class="field">
+          <span>anon key</span>
+          <input id="inp-sb-key" type="password" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>スロット名</span>
+          <input id="inp-sb-slot" type="text" placeholder="kotatsu-main" />
+        </label>
+        <div class="row-btns">
+          <button id="btn-cloud-up" class="btn primary sm" type="button">⬆ アップロード</button>
+          <button id="btn-cloud-down" class="btn ghost sm" type="button">⬇ ダウンロード</button>
+        </div>
+        <button id="btn-pack-export" class="btn ghost sm" type="button">全データをJSONで書き出し</button>
+        <input id="pack-import-file" type="file" accept=".json" hidden />
+        <button id="btn-pack-import" class="btn ghost sm" type="button">全データJSONを読み込み</button>
+        <details class="sql-help">
+          <summary>初回だけ必要な SQL</summary>
+          <pre id="sql-box" class="sql-box"></pre>
+        </details>
+      </div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="./js/app.js?v=4"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js?v=4").catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
