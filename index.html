@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=6" />
+  <link rel="stylesheet" href="./styles.css?v=8" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -50,7 +50,7 @@
         <div class="workspace-head">
           <div>
             <div id="ws-name" class="ws-name">プロジェクト</div>
-            <button id="btn-edit-project" class="linkish" type="button">名前 / プロンプト</button>
+            <button id="btn-edit-project" class="linkish" type="button">名前を変更</button>
           </div>
           <div class="ws-head-actions">
             <button id="btn-delete-project" class="btn ghost xs" type="button" title="プロジェクト削除">🗑</button>
@@ -61,6 +61,15 @@
         <details class="project-section" id="sec-threads" open>
           <summary>スレッド</summary>
           <div id="thread-list" class="session-list"></div>
+        </details>
+        <details class="project-section" id="sec-prompt">
+          <summary>System prompt <span id="project-prompt-mark" class="muted sm"></span></summary>
+          <textarea
+            id="project-system-prompt"
+            rows="6"
+            placeholder="このプロジェクト専用の指示。資料と一緒に毎回乗る"
+          ></textarea>
+          <p class="help">会話の既定プロンプトの後ろに足される。空なら乗らない。</p>
         </details>
         <details class="project-section" id="sec-files" open>
           <summary>資料（RAG）</summary>
@@ -200,7 +209,7 @@
         <div class="panel-title">System Prompt</div>
         <textarea id="inp-system" rows="7" placeholder="この端末の既定プロンプト"></textarea>
         <button id="btn-save-system" class="btn ghost sm" type="button">既定として保存</button>
-        <p class="help">新しいチャットに使われる。開いてる会話のプロンプトは会話側に保存される。</p>
+        <p class="help">新しいチャットに使われる。開いてる会話のプロンプトは会話側に保存される。プロジェクト専用は左パネルの System prompt。</p>
       </div>
 
       <div class="panel">
@@ -289,11 +298,11 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script type="module" src="./js/app.js?v=6"></script>
+  <script type="module" src="./js/app.js?v=8"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=6").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=8").catch(() => {});
       });
     }
   </script>

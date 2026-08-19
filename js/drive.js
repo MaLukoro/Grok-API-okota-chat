@@ -68,9 +68,26 @@ export function consumeOAuthRedirect() {
   return { handled: true, ok: true };
 }
 
-export function startGoogleLogin(clientId) {
-  const id = (clientId || "").trim();
+export function sanitizeClientId(raw) {
+  return String(raw || "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+export function assertClientId(raw) {
+  const id = sanitizeClientId(raw);
   if (!id) throw new Error("先に Google のクライアントIDを保存してくれ");
+  if (!id.endsWith(".apps.googleusercontent.com")) {
+    throw new Error(
+      "クライアントIDが短いか違う。末尾が .apps.googleusercontent.com の長い方を、切れないように貼ってくれ"
+    );
+  }
+  return id;
+}
+
+export function startGoogleLogin(clientId) {
+  const id = assertClientId(clientId);
   const params = new URLSearchParams({
     client_id: id,
     redirect_uri: redirectUri(),

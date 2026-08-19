@@ -39,10 +39,12 @@ import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat
 import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
 import {
+  assertClientId,
   authorizedOrigin,
   clearToken,
   consumeOAuthRedirect,
   downloadFromDrive,
+  sanitizeClientId,
   driveSetupHelp,
   isDriveLoggedIn,
   startGoogleLogin,
@@ -63,6 +65,8 @@ const state = {
   ragSelectedSources: null, // null=全 / []=オフ / names
   findHits: [],
   editingIndex: null,
+  _projectPromptTimer: null,
+  _projectPromptDirty: false,
 };
 
 function settings() {
@@ -280,6 +284,7 @@ function renderWorkspace() {
   if (!on) return;
   const p = state.projects.find((x) => x.id === state.activeProjectId);
   $("#ws-name").textContent = p?.name || "プロジェクト";
+  fillProjectPrompt(p);
   renderSessionItems(state.projectChats, $("#thread-list"));
   const fl = $("#file-list");
   if (!state.files.length) {
@@ -317,7 +322,46 @@ function renderWorkspace() {
   });
 }
 
+function fillProjectPrompt(p) {
+  const ta = $("#project-system-prompt");
+  const mark = $("#project-prompt-mark");
+  if (mark) mark.textContent = (p?.system_prompt || "").trim() ? "入ってる" : "";
+  if (!ta) return;
+  if (document.activeElement === ta) return;
+  ta.value = p?.system_prompt || "";
+}
+
+async function flushProjectSystemPrompt() {
+  clearTimeout(state._projectPromptTimer);
+  state._projectPromptTimer = null;
+  if (!state._projectPromptDirty) return;
+  const pid = state.activeProjectId;
+  const ta = $("#project-system-prompt");
+  if (!pid || !ta) {
+    state._projectPromptDirty = false;
+    return;
+  }
+  const next = ta.value || "";
+  state._projectPromptDirty = false;
+  const p = await getProject(pid);
+  if (!p) return;
+  if ((p.system_prompt || "") === next) return;
+  await saveProject({ ...p, system_prompt: next });
+  const local = state.projects.find((x) => x.id === pid);
+  if (local) local.system_prompt = next;
+  if (state.activeProjectId === pid) fillProjectPrompt({ ...p, system_prompt: next });
+}
+
+function saveProjectSystemPromptSoon() {
+  state._projectPromptDirty = true;
+  clearTimeout(state._projectPromptTimer);
+  state._projectPromptTimer = setTimeout(() => {
+    flushProjectSystemPrompt().catch((e) => console.warn("project prompt save", e));
+  }, 500);
+}
+
 async function openProject(id) {
+  await flushProjectSystemPrompt();
   if (state.activeProjectId === id) {
     await leaveProject();
     return;
@@ -329,6 +373,7 @@ async function openProject(id) {
 }
 
 async function leaveProject() {
+  await flushProjectSystemPrompt();
   state.activeProjectId = null;
   state.ragSelectedSources = null;
   await refreshLists();
@@ -337,10 +382,14 @@ async function leaveProject() {
 async function createProject() {
   const name = prompt("プロジェクト名", "おこた篇") || "";
   if (!name.trim()) return;
+  await flushProjectSystemPrompt();
   const p = await saveProject(emptyProject({ name: name.trim() }));
   state.activeProjectId = p.id;
   await refreshLists();
-  toast("プロジェクト作った", "ok");
+  const sec = $("#sec-prompt");
+  if (sec) sec.open = true;
+  $("#project-system-prompt")?.focus();
+  toast("プロジェクト作った。シスプロは左の欄へ", "ok");
 }
 
 async function editProject() {
@@ -348,9 +397,7 @@ async function editProject() {
   if (!p) return;
   const name = prompt("名前", p.name || "");
   if (name == null) return;
-  const sys = prompt("プロジェクト system prompt（資料と一緒に毎回乗る）", p.system_prompt || "");
-  if (sys == null) return;
-  await saveProject({ ...p, name: name.trim() || p.name, system_prompt: sys });
+  await saveProject({ ...p, name: name.trim() || p.name });
   await refreshLists();
 }
 
@@ -758,6 +805,7 @@ async function commitEditUser(i) {
 async function runGeneration() {
   const chat = state.current;
   if (!chat) return;
+  await flushProjectSystemPrompt();
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
   const query = contentAsText(lastUser?.content || "");
 
@@ -979,10 +1027,15 @@ function bind() {
   $("#btn-new-project").addEventListener("click", createProject);
   $("#btn-leave-project").addEventListener("click", leaveProject);
   $("#btn-edit-project").addEventListener("click", editProject);
+  $("#project-system-prompt")?.addEventListener("input", saveProjectSystemPromptSoon);
+  $("#project-system-prompt")?.addEventListener("blur", () => {
+    flushProjectSystemPrompt().catch((e) => console.warn("project prompt save", e));
+  });
   $("#btn-delete-project").addEventListener("click", async () => {
     const p = state.projects.find((x) => x.id === state.activeProjectId);
     if (!p) return;
     if (!confirm(`「${p.name}」を消す？資料も消える。スレッドは全体チャット側に残る。`)) return;
+    await flushProjectSystemPrompt();
     await deleteProject(p.id);
     state.activeProjectId = null;
     state.ragSelectedSources = null;
@@ -1196,16 +1249,23 @@ function bind() {
       supabaseUrl: $("#inp-sb-url").value.trim(),
       supabaseKey: $("#inp-sb-key").value.trim(),
       backupSlot: $("#inp-sb-slot").value.trim() || "kotatsu-main",
-      googleClientId: $("#inp-gclient").value.trim(),
+      googleClientId: sanitizeClientId($("#inp-gclient").value),
       googleAutoBackup: $("#chk-g-auto").checked,
     });
 
   $("#btn-g-save").addEventListener("click", () => {
     saveCloudFields();
-    toast("クライアントID保存した", "ok");
+    $("#inp-gclient").value = settings().googleClientId || "";
+    try {
+      assertClientId(settings().googleClientId);
+      toast("クライアントID保存した", "ok");
+    } catch (e) {
+      toast(String(e.message || e), "error");
+    }
   });
   $("#btn-g-login").addEventListener("click", () => {
     saveCloudFields();
+    $("#inp-gclient").value = settings().googleClientId || "";
     try {
       startGoogleLogin(settings().googleClientId);
     } catch (e) {
