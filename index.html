@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=8" />
+  <link rel="stylesheet" href="./styles.css?v=9" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -58,18 +58,18 @@
           </div>
         </div>
         <button id="btn-new-thread" class="btn ghost sm ws-new-thread" type="button">＋ スレッド</button>
-        <details class="project-section" id="sec-threads" open>
-          <summary>スレッド</summary>
-          <div id="thread-list" class="session-list"></div>
-        </details>
-        <details class="project-section" id="sec-prompt">
-          <summary>System prompt <span id="project-prompt-mark" class="muted sm"></span></summary>
+        <details class="project-section" id="sec-prompt" open>
+          <summary>シスプロ <span id="project-prompt-mark" class="muted sm"></span></summary>
           <textarea
             id="project-system-prompt"
             rows="6"
             placeholder="このプロジェクト専用の指示。資料と一緒に毎回乗る"
           ></textarea>
           <p class="help">会話の既定プロンプトの後ろに足される。空なら乗らない。</p>
+        </details>
+        <details class="project-section" id="sec-threads" open>
+          <summary>スレッド</summary>
+          <div id="thread-list" class="session-list"></div>
         </details>
         <details class="project-section" id="sec-files" open>
           <summary>資料（RAG）</summary>
@@ -298,11 +298,17 @@
   </div>
 
   <div id="toast" class="toast" hidden></div>
-  <script type="module" src="./js/app.js?v=8"></script>
+  <script type="module" src="./js/app.js?v=9"></script>
   <script>
     if ("serviceWorker" in navigator) {
+      let swRefreshing = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (swRefreshing) return;
+        swRefreshing = true;
+        location.reload();
+      });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=8").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=9").catch(() => {});
       });
     }
   </script>

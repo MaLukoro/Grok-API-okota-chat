@@ -1,14 +1,14 @@
-const CACHE = "kotatsu-v8";
+const CACHE = "kotatsu-v9";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=8",
+  "./styles.css?v=9",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/apple-touch-icon.png",
   "./icons/favicon-64.png",
-  "./js/app.js?v=8",
+  "./js/app.js?v=9",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
@@ -41,8 +41,9 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/v1") || url.hostname === "api.x.ai" || url.hostname.endsWith("supabase.co")) {
     return;
   }
+  const isDoc = req.mode === "navigate" || req.destination === "document";
   event.respondWith(
-    fetch(req)
+    fetch(req, isDoc ? { cache: "reload" } : undefined)
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
