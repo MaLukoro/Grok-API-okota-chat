@@ -65,9 +65,17 @@ const state = {
   ragSelectedSources: null, // null=全 / []=オフ / names
   findHits: [],
   editingIndex: null,
+  pendingAttachments: [],
+  attachBusy: false,
   _projectPromptTimer: null,
   _projectPromptDirty: false,
 };
+
+const MAX_ATTACH = 6;
+const MAX_MD_BYTES = 512 * 1024;
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_EDGE = 1600;
+const MAX_API_IMAGES = 6;
 
 function settings() {
   return state.settings;
@@ -579,6 +587,7 @@ function renderMessages({ scroll = true } = {}) {
       const role = m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "system";
       if (role === "system") return "";
       const body = renderSoftMarkdown(contentAsText(m.content));
+      const atts = renderAttachmentsHtml(m);
       const rag = m.rag
         ? m.rag.rag_enabled === false
           ? `<div class="rag-chip off">RAG OFF · 資料参照なし</div>`
@@ -591,12 +600,13 @@ function renderMessages({ scroll = true } = {}) {
       if (editing) {
         return `<article class="msg ${role} editing" data-i="${i}">
           <div class="msg-role">まろ · 編集中</div>
+          ${atts}
           <textarea class="edit-input" data-edit-i="${i}" rows="3">${escapeHtml(contentAsText(m.content))}</textarea>
           <div class="msg-actions">
             <button type="button" class="btn primary sm" data-act="edit-save" data-i="${i}">やり直す</button>
             <button type="button" class="btn ghost sm" data-act="edit-cancel">キャンセル</button>
           </div>
-          <div class="muted sm">このあとにある返答は消えて、ここから生成し直す。</div>
+          <div class="muted sm">このあとにある返答は消えて、ここから生成し直す。添付はそのまま残る。</div>
         </article>`;
       }
       const actions = state.streaming
@@ -609,9 +619,14 @@ function renderMessages({ scroll = true } = {}) {
               <button type="button" class="btn ghost xs" data-act="regen" data-i="${i}">🔄 再生成</button>
               <button type="button" class="btn ghost xs" data-act="speak" data-i="${i}">🔊 Rex</button>
             </div>`;
+      const bodyHtml = body
+        ? `<div class="msg-body">${body}</div>`
+        : atts
+          ? ""
+          : `<div class="msg-body"><span class="muted">（空）</span></div>`;
       return `<article class="msg ${role}" data-i="${i}">
         <div class="msg-role">${role === "user" ? "まろ" : "グリク"}</div>
-        <div class="msg-body">${body || '<span class="muted">（空）</span>'}</div>
+        ${atts}${bodyHtml}
         ${rag}${meta}${actions}
       </article>`;
     })
@@ -642,7 +657,7 @@ function applyFind(q) {
   nodes.forEach((el) => {
     const i = Number(el.dataset.i);
     const m = state.current?.messages?.[i];
-    const hit = contentAsText(m?.content).toLowerCase().includes(query);
+    const hit = messagePlainText(m).toLowerCase().includes(query);
     el.classList.toggle("hit", hit);
     if (hit) {
       n += 1;
@@ -655,6 +670,79 @@ function applyFind(q) {
 
 // ── Chat send ────────────────────────────────────────────────
 
+function classifyAttach(file) {
+  const name = file?.name || "file";
+  const mime = String(file?.type || "").toLowerCase();
+  if (/\.(md|markdown)$/i.test(name) || mime === "text/markdown" || mime === "text/x-markdown") return "md";
+  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(name)) return "image";
+  return null;
+}
+
+function messagePlainText(m) {
+  if (!m) return "";
+  const bits = [contentAsText(m.content)];
+  for (const a of m.attachments || []) {
+    if (a?.kind === "md" && a.text) bits.push(a.text);
+    else if (a?.name) bits.push(a.name);
+  }
+  return bits.filter(Boolean).join("\n");
+}
+
+function countMessageImages(m) {
+  let n = 0;
+  for (const a of m?.attachments || []) {
+    if (a?.kind === "image" && a.dataUrl) n += 1;
+  }
+  if (Array.isArray(m?.content)) {
+    for (const p of m.content) {
+      if (p?.image_url?.url || (p?.type === "image_url" && p.url)) n += 1;
+    }
+  }
+  return n;
+}
+
+function toApiContent(m, { includeImages = true } = {}) {
+  const atts = Array.isArray(m.attachments) ? m.attachments : [];
+  const mdBlocks = atts
+    .filter((a) => a.kind === "md" && a.text)
+    .map((a) => `--- 添付ファイル: ${a.name || "note.md"} ---\n${a.text}`)
+    .join("\n\n");
+  let text = [contentAsText(m.content), mdBlocks].filter(Boolean).join("\n\n");
+
+  const imageParts = [];
+  if (includeImages) {
+    for (const a of atts) {
+      if (a.kind === "image" && a.dataUrl) {
+        imageParts.push({
+          type: "image_url",
+          image_url: { url: a.dataUrl, detail: "high" },
+        });
+      }
+    }
+    if (Array.isArray(m.content)) {
+      for (const p of m.content) {
+        const url = p?.image_url?.url || (p?.type === "image_url" && p.url);
+        if (url) {
+          imageParts.push({
+            type: "image_url",
+            image_url: { url, detail: p.image_url?.detail || "high" },
+          });
+        }
+      }
+    }
+  } else {
+    const names = atts.filter((a) => a.kind === "image").map((a) => a.name).filter(Boolean);
+    if (names.length) text = [text, `（画像: ${names.join(", ")}）`].filter(Boolean).join("\n");
+  }
+
+  if (!imageParts.length) return text;
+  const parts = [];
+  if (text) parts.push({ type: "text", text });
+  else parts.push({ type: "text", text: "この画像を見て" });
+  parts.push(...imageParts);
+  return parts;
+}
+
 function buildApiMessages(chat, extraSystem) {
   const sysParts = [];
   if (chat.system_prompt) sysParts.push(chat.system_prompt);
@@ -663,24 +751,258 @@ function buildApiMessages(chat, extraSystem) {
   if (sysParts.length) out.push({ role: "system", content: sysParts.join("\n\n") });
   const msgs = chat.messages || [];
   // 長編保護: だいたい 350k 文字で古い順に落とす
-  let acc = [];
+  const acc = [];
   let used = 0;
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i];
     if (m.role !== "user" && m.role !== "assistant") continue;
-    const text = contentAsText(m.content);
+    const text = messagePlainText(m);
     if (used + text.length > 350000 && acc.length) break;
-    acc.push({ role: m.role, content: text });
+    acc.push(m);
     used += text.length;
   }
   acc.reverse();
-  return out.concat(acc);
+
+  let imagesLeft = MAX_API_IMAGES;
+  const keepImg = acc.map(() => false);
+  for (let i = acc.length - 1; i >= 0; i--) {
+    if (acc[i].role !== "user") continue;
+    const n = countMessageImages(acc[i]);
+    if (n && imagesLeft > 0) {
+      keepImg[i] = true;
+      imagesLeft -= n;
+    }
+  }
+  return out.concat(
+    acc.map((m, i) => ({
+      role: m.role,
+      content: toApiContent(m, { includeImages: !!keepImg[i] }),
+    }))
+  );
+}
+
+function renderAttachmentsHtml(m) {
+  const bits = [];
+  for (const a of m.attachments || []) {
+    if (a.kind === "image" && a.dataUrl) {
+      bits.push(
+        `<button type="button" class="msg-att-img" data-act="zoom-att">
+          <img src="${escapeAttr(a.dataUrl)}" alt="${escapeAttr(a.name || "画像")}" />
+        </button>`
+      );
+    } else if (a.kind === "md") {
+      const preview = String(a.text || "");
+      const shown = preview.length > 8000 ? `${preview.slice(0, 8000)}\n…` : preview;
+      bits.push(
+        `<details class="msg-att-md">
+          <summary><span class="att-ico">MD</span>${escapeHtml(a.name || "note.md")}</summary>
+          <pre class="md-pre">${escapeHtml(shown)}</pre>
+        </details>`
+      );
+    }
+  }
+  if (!bits.length && Array.isArray(m.content)) {
+    for (const p of m.content) {
+      const url = p?.image_url?.url;
+      if (!url) continue;
+      bits.push(
+        `<button type="button" class="msg-att-img" data-act="zoom-att">
+          <img src="${escapeAttr(url)}" alt="" />
+        </button>`
+      );
+    }
+  }
+  return bits.length ? `<div class="msg-atts">${bits.join("")}</div>` : "";
+}
+
+function renderAttachPreview() {
+  const box = $("#attach-preview");
+  if (!box) return;
+  const atts = state.pendingAttachments;
+  if (!atts.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = atts
+    .map((a, i) => {
+      if (a.kind === "image") {
+        return `<div class="att-chip image">
+          <img src="${escapeAttr(a.dataUrl)}" alt="" />
+          <span>${escapeHtml(a.name || "画像")}</span>
+          <span class="muted">${escapeHtml(formatBytes(a.size))}</span>
+          <button type="button" class="att-x" data-remove-att="${i}" aria-label="外す">✕</button>
+        </div>`;
+      }
+      return `<div class="att-chip md">
+        <span class="att-ico">MD</span>
+        <span>${escapeHtml(a.name || "note.md")}</span>
+        <span class="muted">${escapeHtml(formatBytes(a.size))}</span>
+        <button type="button" class="att-x" data-remove-att="${i}" aria-label="外す">✕</button>
+      </div>`;
+    })
+    .join("");
+}
+
+function openAttZoom(src) {
+  const wrap = $("#att-zoom");
+  const img = $("#att-zoom-img");
+  if (!wrap || !img || !src) return;
+  img.src = src;
+  wrap.hidden = false;
+}
+
+function closeAttZoom() {
+  const wrap = $("#att-zoom");
+  const img = $("#att-zoom-img");
+  if (!wrap) return;
+  wrap.hidden = true;
+  if (img) img.removeAttribute("src");
+}
+
+async function readMdAttachment(file) {
+  if (file.size > MAX_MD_BYTES) throw new Error("mdは512KBまで");
+  const text = await file.text();
+  return {
+    kind: "md",
+    name: file.name || "note.md",
+    mime: file.type || "text/markdown",
+    size: file.size || text.length,
+    text,
+  };
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ""));
+    r.onerror = () => reject(new Error("読み込み失敗"));
+    r.readAsDataURL(file);
+  });
+}
+
+async function decodeImageFile(file) {
+  try {
+    return await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    /* older Safari */
+  }
+  try {
+    return await createImageBitmap(file);
+  } catch {
+    /* fall through */
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("decode"));
+      el.src = url;
+    });
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function readImageAttachment(file) {
+  if (file.size > MAX_IMAGE_BYTES) throw new Error("画像は15MBまで");
+  const isGif = /gif$/i.test(file.type) || /\.gif$/i.test(file.name);
+  if (isGif && file.size <= 2 * 1024 * 1024) {
+    return {
+      kind: "image",
+      name: file.name || "image.gif",
+      mime: "image/gif",
+      size: file.size,
+      dataUrl: await readAsDataUrl(file),
+    };
+  }
+
+  let source;
+  try {
+    source = await decodeImageFile(file);
+  } catch {
+    throw new Error("この画像は読めない。PNG/JPEGにしてくれ");
+  }
+
+  const srcW = source.width || 0;
+  const srcH = source.height || 0;
+  if (!srcW || !srcH) {
+    if (source.close) source.close();
+    throw new Error("画像サイズが取れない");
+  }
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(srcW, srcH));
+  const w = Math.max(1, Math.round(srcW * scale));
+  const h = Math.max(1, Math.round(srcH * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    if (source.close) source.close();
+    throw new Error("canvas が使えない");
+  }
+  ctx.drawImage(source, 0, 0, w, h);
+  if (source.close) source.close();
+
+  const preferPng = (/png$/i.test(file.type) || /\.png$/i.test(file.name)) && w * h < 2_000_000;
+  let dataUrl = preferPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.84);
+  if (dataUrl.length > 1.8 * 1024 * 1024) dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+  if (dataUrl.length > 3.2 * 1024 * 1024) dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+  if (dataUrl.length > 4.5 * 1024 * 1024) throw new Error("圧縮しても大きい");
+
+  const mime = dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
+  const name = file.name || (mime === "image/png" ? "image.png" : "image.jpg");
+  return {
+    kind: "image",
+    name,
+    mime,
+    size: Math.round((dataUrl.length * 3) / 4),
+    dataUrl,
+  };
+}
+
+async function addComposerFiles(fileList) {
+  const files = [...(fileList || [])];
+  if (!files.length) return;
+  state.attachBusy = true;
+  try {
+    const skipped = [];
+    for (const file of files) {
+      if (state.pendingAttachments.length >= MAX_ATTACH) {
+        skipped.push(`${file.name}（上限${MAX_ATTACH}）`);
+        continue;
+      }
+      const kind = classifyAttach(file);
+      if (!kind) {
+        skipped.push(`${file.name}（md/画像以外）`);
+        continue;
+      }
+      try {
+        const att = kind === "md" ? await readMdAttachment(file) : await readImageAttachment(file);
+        state.pendingAttachments.push(att);
+      } catch (e) {
+        skipped.push(`${file.name}（${e.message || e}）`);
+      }
+    }
+    renderAttachPreview();
+    if (skipped.length) toast(skipped.slice(0, 3).join(" / "), "error");
+  } finally {
+    state.attachBusy = false;
+  }
 }
 
 async function sendMessage() {
   const input = $("#input");
   const text = (input.value || "").trim();
-  if (!text) return;
+  const atts = state.pendingAttachments.slice();
+  if (!text && !atts.length) return;
+  if (state.attachBusy) {
+    toast("添付の読み込み中だ。ちょっと待って", "error");
+    return;
+  }
   if (!settings().apiKey) {
     toast("先に API キーを入れてくれ", "error");
     openDrawer("right");
@@ -692,10 +1014,16 @@ async function sendMessage() {
     await createChat({ projectId: state.activeProjectId });
   }
   const chat = state.current;
-  chat.messages.push({ role: "user", content: text });
-  if (isDefaultTitle(chat.title)) chat.title = firstLine(text, 36);
+  const msg = { role: "user", content: text };
+  if (atts.length) msg.attachments = atts;
+  chat.messages.push(msg);
+  if (isDefaultTitle(chat.title)) {
+    chat.title = firstLine(text, 36) || firstLine(atts[0]?.name || "添付", 36);
+  }
   chat.model = settings().model;
   input.value = "";
+  state.pendingAttachments = [];
+  renderAttachPreview();
   autoResize(input);
   await persistCurrent();
   renderMessages();
@@ -775,7 +1103,8 @@ async function commitEditUser(i) {
   if (!chat) return;
   const ta = document.querySelector(`.edit-input[data-edit-i="${i}"]`);
   const text = (ta?.value || "").trim();
-  if (!text) {
+  const keptAtts = chat.messages[i].attachments;
+  if (!text && !(keptAtts && keptAtts.length)) {
     toast("空ではやり直せない", "error");
     return;
   }
@@ -790,10 +1119,12 @@ async function commitEditUser(i) {
   if (i === firstUser) {
     const oldLine = firstLine(old, 36);
     if (isDefaultTitle(chat.title) || chat.title === oldLine) {
-      chat.title = firstLine(text, 36);
+      chat.title = firstLine(text, 36) || firstLine(keptAtts?.[0]?.name || "", 36) || chat.title;
     }
   }
-  chat.messages[i] = { role: "user", content: text };
+  const next = { role: "user", content: text };
+  if (keptAtts && keptAtts.length) next.attachments = keptAtts;
+  chat.messages[i] = next;
   chat.messages = chat.messages.slice(0, i + 1);
   chat.model = settings().model;
   state.editingIndex = null;
@@ -807,7 +1138,7 @@ async function runGeneration() {
   if (!chat) return;
   await flushProjectSystemPrompt();
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
-  const query = contentAsText(lastUser?.content || "");
+  const query = messagePlainText(lastUser || {});
 
   let extra = "";
   let ragMeta = null;
@@ -1058,6 +1389,10 @@ function bind() {
       const m = state.current?.messages?.[i];
       if (m) speakAssistant(contentAsText(m.content));
     }
+    if (act === "zoom-att") {
+      const src = btn.querySelector("img")?.src;
+      if (src) openAttZoom(src);
+    }
   });
   $("#messages").addEventListener("keydown", (e) => {
     const ta = e.target.closest(".edit-input");
@@ -1109,6 +1444,11 @@ function bind() {
   dropZone($("#file-drop"), addProjectFiles);
   dropZone($("#composer-drop"), async (files) => {
     const jsons = files.filter((f) => /\.json$/i.test(f.name));
+    const attachable = files.filter((f) => classifyAttach(f));
+    if (attachable.length) {
+      await addComposerFiles(attachable);
+      return;
+    }
     if (jsons.length) {
       try {
         await importFromFile(jsons[0]);
@@ -1117,8 +1457,43 @@ function bind() {
       }
       return;
     }
-    if (state.activeProjectId) await addProjectFiles(files);
-    else toast("JSONなら会話再開、資料ならプロジェクトを開いてドロップ", "error");
+    toast("チャットには .md か画像。JSONは会話再開、資料は左の資料欄へ", "error");
+  });
+
+  $("#btn-attach").addEventListener("click", () => $("#attach-file").click());
+  $("#attach-file").addEventListener("change", async (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = "";
+    if (files.length) await addComposerFiles(files);
+  });
+  $("#attach-preview").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-remove-att]");
+    if (!btn) return;
+    const i = Number(btn.dataset.removeAtt);
+    if (Number.isNaN(i)) return;
+    state.pendingAttachments.splice(i, 1);
+    renderAttachPreview();
+  });
+  $("#input").addEventListener("paste", (e) => {
+    const items = [...(e.clipboardData?.items || [])];
+    const files = [];
+    for (const it of items) {
+      if (it.kind === "file") {
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (!files.length) return;
+    const hasText = [...(e.clipboardData?.types || [])].includes("text/plain");
+    if (!hasText) e.preventDefault();
+    addComposerFiles(files);
+  });
+  $("#att-zoom").addEventListener("click", closeAttZoom);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#att-zoom")?.hidden) {
+      e.preventDefault();
+      closeAttZoom();
+    }
   });
 
   $("#btn-send").addEventListener("click", sendMessage);
