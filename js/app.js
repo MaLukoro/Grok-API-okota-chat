@@ -917,6 +917,10 @@ function renderAttachmentsHtml(m) {
           <img src="${escapeAttr(a.dataUrl)}" alt="${escapeAttr(a.name || "画像")}" />
         </button>`
       );
+    } else if (a.kind === "image") {
+      bits.push(
+        `<div class="msg-att-omitted">🖼 ${escapeHtml(a.name || "画像")}（Driveは画像を運ばない）</div>`
+      );
     } else if (a.kind === "md") {
       const preview = String(a.text || "");
       const shown = preview.length > 8000 ? `${preview.slice(0, 8000)}\n…` : preview;
@@ -1807,7 +1811,7 @@ function bind() {
     try {
       const r = await uploadToDrive(settings());
       persistSettings({ googleLastBackup: new Date().toISOString() });
-      toast(`ドライブへ保存: ${r.name} · 会話${r.chats} · 設定も入れた`, "ok");
+      toast(`ドライブへ保存: ${r.name} · 会話${r.chats} · 設定も入れた · 画像は乗せてない`, "ok");
     } catch (e) {
       toast(String(e.message || e), "error");
     }

@@ -441,6 +441,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   max-height: 240px;
   object-fit: contain;
 }
+.msg-att-omitted {
+  font-size: 12px;
+  color: var(--text-mute);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg0);
+}
 .msg-att-md {
   font-size: 12px;
   color: var(--text-dim);

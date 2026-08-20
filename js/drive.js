@@ -158,7 +158,7 @@ async function findBackupFile(folderId, name) {
 }
 
 export async function uploadToDrive(settings) {
-  const pack = await exportPack();
+  const pack = await exportPack({ omitImageData: true });
   const name = fileNameFor(settings);
   const folderId = await ensureFolder();
   const existing = await findBackupFile(folderId, name);

@@ -205,18 +205,91 @@ export async function deleteFile(id) {
   await txDone(tx);
 }
 
-export async function exportPack() {
+function isImageDataUrl(s) {
+  return typeof s === "string" && /^data:image\//i.test(s);
+}
+
+function messageHasImageData(m) {
+  if ((m?.attachments || []).some((a) => a?.kind === "image" && a.dataUrl)) return true;
+  if (Array.isArray(m?.content)) {
+    return m.content.some((p) => isImageDataUrl(p?.image_url?.url || p?.url));
+  }
+  return false;
+}
+
+function stripMessageImageData(m) {
+  if (!m || typeof m !== "object") return m;
+  const next = { ...m };
+  const atts = Array.isArray(next.attachments)
+    ? next.attachments.map((a) => {
+        if (a?.kind === "image" && a.dataUrl) {
+          const { dataUrl: _drop, ...rest } = a;
+          return { ...rest, omitted: true };
+        }
+        return a;
+      })
+    : [];
+
+  if (Array.isArray(next.content)) {
+    const kept = [];
+    let droppedImage = false;
+    for (const p of next.content) {
+      const url = p?.image_url?.url || (p?.type === "image_url" && p.url);
+      if (isImageDataUrl(url)) {
+        droppedImage = true;
+        continue;
+      }
+      kept.push(p);
+    }
+    if (droppedImage && !atts.some((a) => a.kind === "image")) {
+      atts.push({ kind: "image", name: "image", omitted: true });
+    }
+    if (kept.length === 1 && kept[0]?.type === "text") next.content = kept[0].text || "";
+    else next.content = kept;
+  }
+  if (atts.length) next.attachments = atts;
+  return next;
+}
+
+function stripChatImageData(chat) {
+  if (!chat?.messages) return chat;
+  return {
+    ...chat,
+    messages: chat.messages.map(stripMessageImageData),
+  };
+}
+
+function mergeChatKeepingImages(existing, incoming) {
+  if (!existing?.messages?.length) return incoming;
+  const oldMsgs = existing.messages;
+  const nextMsgs = (incoming.messages || []).map((m, i) => {
+    const old = oldMsgs[i];
+    if (old && old.role === m.role && messageHasImageData(old) && !messageHasImageData(m)) {
+      return {
+        ...m,
+        attachments: old.attachments || m.attachments,
+        content: Array.isArray(old.content) ? old.content : m.content,
+      };
+    }
+    return m;
+  });
+  return { ...incoming, messages: nextMsgs };
+}
+
+export async function exportPack({ omitImageData = false } = {}) {
   const db = await openDb();
   const [chats, projects, files] = await Promise.all([
     reqToPromise(db.transaction("chats").objectStore("chats").getAll()),
     reqToPromise(db.transaction("projects").objectStore("projects").getAll()),
     reqToPromise(db.transaction("files").objectStore("files").getAll()),
   ]);
+  const chatsOut = omitImageData ? (chats || []).map(stripChatImageData) : chats || [];
   return {
     app: "grok-kotatsu",
     version: 2,
     exported_at: nowSec(),
-    chats: chats || [],
+    omit_image_data: omitImageData || undefined,
+    chats: chatsOut,
     projects: projects || [],
     files: files || [],
     settings: exportSettings(),
@@ -242,7 +315,13 @@ export async function importPack(pack, { merge = true } = {}) {
     if (f && f.id) tx.objectStore("files").put(f);
   }
   for (const c of chats) {
-    if (c && c.id) tx.objectStore("chats").put(c);
+    if (!c || !c.id) continue;
+    if (merge) {
+      const existing = await reqToPromise(tx.objectStore("chats").get(c.id));
+      tx.objectStore("chats").put(mergeChatKeepingImages(existing, c));
+    } else {
+      tx.objectStore("chats").put(c);
+    }
   }
   await txDone(tx);
   let settingsImported = false;
