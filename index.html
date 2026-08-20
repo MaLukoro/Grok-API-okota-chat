@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=11" />
+  <link rel="stylesheet" href="./styles.css?v=13" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -207,6 +207,20 @@
           <button id="btn-credit" class="btn ghost sm" type="button">残量を更新</button>
         </div>
         <p class="help">チャット用 APIキーでは残高は見えない。console.x.ai → Settings → Management Keys で、Billing が読めるキーを発行してくれ。</p>
+        <details class="sql-help">
+          <summary>残高が弾かれたとき（中継＝Worker）</summary>
+          <p class="help">チャット用のサーバーはブラウザ直OK。残高サーバーだけ拒否する。中継は Cloudflare が無料で貸す小さいプログラムで、名前が Worker。チャットには不要。</p>
+          <pre class="sql-box">1. https://dash.cloudflare.com に入る（無料）
+2. Workers &amp; Pages → Create → Hello World で作る
+3. コードを全部消して、このフォルダの worker.js を貼る
+4. Deploy
+5. 出てきた https://なにか.workers.dev の後ろに /v1 を付けて
+   ⚙ のプロキシURLへ。例: https://xxx.workers.dev/v1
+6. 残量を更新
+
+プロキシを入れるとチャットもそこを通る。worker.js は最新を貼れ。
+中継したくなければ、残高表示は諦めてチャットだけ使えばいい。</pre>
+        </details>
       </div>
 
       <div class="panel">
@@ -267,7 +281,7 @@
 
       <div class="panel">
         <div class="panel-title">Google ドライブ</div>
-        <p class="help">会話の作業場は端末。ドライブはコピー先。iPhone と PC で同じログを行き来できる。</p>
+        <p class="help">会話の作業場は端末。ドライブはコピー先。⬆ すると APIキー・Management Key・プロキシも一緒に乗る。別端末は Google ログインして ⬇。</p>
         <label class="field">
           <span>OAuth クライアントID</span>
           <input id="inp-gclient" type="text" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com" />
@@ -325,7 +339,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=11"></script>
+  <script type="module" src="./js/app.js?v=13"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -335,7 +349,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=11").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=13").catch(() => {});
       });
     }
   </script>

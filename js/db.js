@@ -1,6 +1,7 @@
 /** IndexedDB: chats / projects / files */
 
 import { makeId, nowSec } from "./util.js";
+import { exportSettings, importSettings } from "./settings.js";
 
 const DB_NAME = "grok-kotatsu";
 const DB_VERSION = 1;
@@ -213,11 +214,12 @@ export async function exportPack() {
   ]);
   return {
     app: "grok-kotatsu",
-    version: 1,
+    version: 2,
     exported_at: nowSec(),
     chats: chats || [],
     projects: projects || [],
     files: files || [],
+    settings: exportSettings(),
   };
 }
 
@@ -243,5 +245,15 @@ export async function importPack(pack, { merge = true } = {}) {
     if (c && c.id) tx.objectStore("chats").put(c);
   }
   await txDone(tx);
-  return { chats: chats.length, projects: projects.length, files: files.length };
+  let settingsImported = false;
+  if (pack.settings) {
+    importSettings(pack.settings, { merge });
+    settingsImported = true;
+  }
+  return {
+    chats: chats.length,
+    projects: projects.length,
+    files: files.length,
+    settings: settingsImported,
+  };
 }

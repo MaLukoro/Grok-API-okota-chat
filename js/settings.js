@@ -1,4 +1,4 @@
-/** localStorage 設定。APIキーは端末内のみ。 */
+/** localStorage 設定。キーも Drive パックに乗せる（自分のマイドライブ専用）。 */
 
 const KEY = "kotatsu_settings_v1";
 
@@ -60,6 +60,54 @@ export function saveSettings(partial) {
   const next = { ...loadSettings(), ...partial };
   localStorage.setItem(KEY, JSON.stringify(next));
   return next;
+}
+
+const SYNC_SETTING_KEYS = [
+  "apiKey",
+  "proxyBase",
+  "mgmtKey",
+  "teamId",
+  "model",
+  "temperature",
+  "topP",
+  "maxTokens",
+  "systemPrompt",
+  "voiceId",
+  "voiceLang",
+  "voiceSpeed",
+  "autoSpeak",
+  "ragTopK",
+  "ragMaxChars",
+  "webSearch",
+  "supabaseUrl",
+  "supabaseKey",
+  "backupSlot",
+  "googleClientId",
+  "googleAutoBackup",
+];
+
+const KEEP_IF_EMPTY = new Set(["apiKey", "mgmtKey", "proxyBase", "googleClientId", "supabaseKey", "supabaseUrl"]);
+
+export function exportSettings() {
+  const s = loadSettings();
+  const out = {};
+  for (const k of SYNC_SETTING_KEYS) {
+    if (s[k] !== undefined) out[k] = s[k];
+  }
+  return out;
+}
+
+export function importSettings(partial, { merge = true } = {}) {
+  if (!partial || typeof partial !== "object") return loadSettings();
+  const patch = {};
+  for (const k of SYNC_SETTING_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(partial, k)) continue;
+    const v = partial[k];
+    if (merge && KEEP_IF_EMPTY.has(k) && (v == null || v === "")) continue;
+    patch[k] = v;
+  }
+  if (!Object.keys(patch).length) return loadSettings();
+  return saveSettings(patch);
 }
 
 export function maskKey(key) {

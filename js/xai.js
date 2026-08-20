@@ -287,7 +287,7 @@ async function mgmtFetchJson(settings, path) {
   } catch (e) {
     if (resolveMgmtBase(settings) === MGMT_DIRECT) {
       throw new Error(
-        "残高APIがブラウザに弾かれた（CORS）。⚙ のプロキシURLに Worker を入れて、Worker も最新に上げ直してくれ。"
+        "残高サーバーがブラウザ直を拒否してる。チャットはそのままでいい。残量を出したいときだけ、⚙ のプロキシURLに中継（Cloudflare Worker）が要る。やり方は設定の「残高が弾かれたとき」か、兄貴に聞け。"
       );
     }
     throw new Error(`残高の取得に失敗: ${e.message || e}`);

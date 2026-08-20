@@ -86,6 +86,12 @@ function persistSettings(partial) {
   syncSettingsUi();
 }
 
+function applyImportedSettings(stats) {
+  state.settings = loadSettings();
+  syncSettingsUi();
+  if (stats?.settings && settings().mgmtKey) refreshCredits({ silent: true });
+}
+
 // ── Settings UI ──────────────────────────────────────────────
 
 function syncSettingsUi() {
@@ -1409,8 +1415,12 @@ async function importFromFile(file) {
   if (data && Array.isArray(data.chats) && data.app === "grok-kotatsu") {
     const { importPack } = await import("./db.js");
     const stats = await importPack(data, { merge: true });
+    applyImportedSettings(stats);
     await refreshLists();
-    toast(`パック読込: 会話${stats.chats} / 案件${stats.projects}`, "ok");
+    toast(
+      `パック読込: 会話${stats.chats} / 案件${stats.projects}${stats.settings ? " · 設定も入れた" : ""}`,
+      "ok"
+    );
     return;
   }
   await importPayload(data, { fallbackTitle: file.name.replace(/\.json$/i, ""), newId: true });
@@ -1797,19 +1807,23 @@ function bind() {
     try {
       const r = await uploadToDrive(settings());
       persistSettings({ googleLastBackup: new Date().toISOString() });
-      toast(`ドライブへ保存: ${r.name} · 会話${r.chats}`, "ok");
+      toast(`ドライブへ保存: ${r.name} · 会話${r.chats} · 設定も入れた`, "ok");
     } catch (e) {
       toast(String(e.message || e), "error");
     }
   });
   $("#btn-g-down").addEventListener("click", async () => {
     saveCloudFields();
-    if (!confirm("ドライブのパックをこの端末に取り込む。同じ id は上書き。いい？")) return;
+    if (!confirm("ドライブのパックをこの端末に取り込む。会話と同じ id は上書き。キーとプロキシも上書き。いい？")) return;
     try {
       const r = await downloadFromDrive(settings(), { merge: true });
+      applyImportedSettings(r);
       await refreshLists();
       renderMessages();
-      toast(`ドライブから復元: 会話${r.chats} / 案件${r.projects}`, "ok");
+      toast(
+        `ドライブから復元: 会話${r.chats} / 案件${r.projects}${r.settings ? " · 設定も入れた" : ""}`,
+        "ok"
+      );
     } catch (e) {
       toast(String(e.message || e), "error");
     }
@@ -1828,8 +1842,9 @@ function bind() {
     if (!confirm("クラウドのパックをこの端末に取り込む。同じ id は上書きされる。いい？")) return;
     try {
       const r = await downloadBackup(settings(), { merge: true });
+      applyImportedSettings(r);
       await refreshLists();
-      toast(`入れた: 会話${r.chats} / 案件${r.projects}`, "ok");
+      toast(`入れた: 会話${r.chats} / 案件${r.projects}${r.settings ? " · 設定も入れた" : ""}`, "ok");
     } catch (e) {
       toast(String(e.message || e), "error");
     }
