@@ -1,14 +1,14 @@
-const CACHE = "kotatsu-v10";
+const CACHE = "kotatsu-v11";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=10",
+  "./styles.css?v=11",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/apple-touch-icon.png",
   "./icons/favicon-64.png",
-  "./js/app.js?v=10",
+  "./js/app.js?v=11",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
@@ -38,7 +38,13 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.pathname.startsWith("/v1") || url.hostname === "api.x.ai" || url.hostname.endsWith("supabase.co")) {
+  if (
+    url.pathname.startsWith("/v1") ||
+    url.pathname.startsWith("/mgmt") ||
+    url.hostname === "api.x.ai" ||
+    url.hostname === "management-api.x.ai" ||
+    url.hostname.endsWith("supabase.co")
+  ) {
     return;
   }
   const isDoc = req.mode === "navigate" || req.destination === "document";

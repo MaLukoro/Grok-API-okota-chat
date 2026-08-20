@@ -485,12 +485,54 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .composer-meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 8px;
   color: var(--text-mute);
   font-size: 11px;
   margin-top: 6px;
   padding: 0 4px;
 }
+
+.credit-chip {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.credit-chip:hover { border-color: var(--accent-2); }
+.credit-chip.low { color: var(--warn); border-color: var(--warn); }
+.credit-chip.empty { color: var(--danger); border-color: var(--danger); }
+
+.credit-box {
+  background: var(--bg0);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.credit-box-label {
+  color: var(--text-mute);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.credit-remaining {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 4px;
+  color: var(--accent);
+}
+.credit-box.low .credit-remaining { color: var(--warn); }
+.credit-box.empty .credit-remaining { color: var(--danger); }
+.credit-detail { color: var(--text-dim); font-size: 12px; }
+.credit-status { margin-top: 6px; }
 
 .rag-source-bar {
   display: flex;

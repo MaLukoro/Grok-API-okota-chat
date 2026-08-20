@@ -33,7 +33,7 @@ import {
   saveFile,
   saveProject,
 } from "./db.js";
-import { chatStream, listModels, sanitizeApiKey } from "./xai.js";
+import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
@@ -92,7 +92,10 @@ function syncSettingsUi() {
   const s = settings();
   $("#inp-apikey").value = s.apiKey || "";
   $("#inp-proxy").value = s.proxyBase || "";
+  $("#inp-mgmtkey").value = s.mgmtKey || "";
+  $("#inp-teamid").value = s.teamId || "";
   $("#key-hint").textContent = s.apiKey ? `保存済み ${maskKey(s.apiKey)}` : "未設定";
+  renderCreditUi();
   $("#rng-temp").value = s.temperature;
   $("#val-temp").textContent = Number(s.temperature).toFixed(2);
   $("#rng-max").value = s.maxTokens;
@@ -179,6 +182,124 @@ function fillModelSelect() {
 function updateGenHint() {
   const s = settings();
   $("#gen-hint").textContent = `${s.model} · temp ${s.temperature} · max ${s.maxTokens}${s.webSearch ? " · web" : ""}`;
+}
+
+const CREDIT_LOW_USD = 5;
+const CREDIT_MIN_MS = 20_000;
+let creditBusy = false;
+let lastCreditFetch = 0;
+
+function creditTone(remaining) {
+  if (remaining == null) return "";
+  if (remaining <= 0) return "empty";
+  if (remaining <= CREDIT_LOW_USD) return "low";
+  return "";
+}
+
+function renderCreditUi() {
+  const s = settings();
+  const box = $("#credit-box");
+  const remainingEl = $("#credit-remaining");
+  const detailEl = $("#credit-detail");
+  const statusEl = $("#credit-status");
+  const chip = $("#credit-chip");
+  if (!remainingEl || !chip) return;
+
+  const snap = s.creditSnapshot;
+  const hasKey = !!sanitizeApiKey(s.mgmtKey);
+  const remaining = snap?.remainingUsd;
+  const tone = creditTone(remaining);
+
+  box?.classList.toggle("low", tone === "low");
+  box?.classList.toggle("empty", tone === "empty");
+  remainingEl.textContent = remaining == null ? "—" : formatUsd(remaining);
+
+  if (snap && (snap.purchasedUsd != null || snap.usedUsd != null)) {
+    const bits = [];
+    if (snap.purchasedUsd != null) bits.push(`購入 ${formatUsd(snap.purchasedUsd)}`);
+    if (snap.usedUsd != null) bits.push(`使用 ${formatUsd(snap.usedUsd)}`);
+    detailEl.textContent = bits.join(" · ");
+  } else {
+    detailEl.textContent = "";
+  }
+
+  if (!hasKey) {
+    statusEl.textContent = "Management Key を入れると残量が出る";
+    chip.hidden = true;
+    return;
+  }
+  if (creditBusy) {
+    statusEl.textContent = "残高を取りにいってる…";
+  } else if (snap?.fetchedAt) {
+    statusEl.textContent = `最終 ${new Date(snap.fetchedAt).toLocaleString("ja-JP")}${s.mgmtKey ? ` · ${maskKey(s.mgmtKey)}` : ""}`;
+  } else {
+    statusEl.textContent = "まだ取ってない。下の「残量を更新」";
+  }
+
+  if (remaining == null) {
+    chip.hidden = true;
+    return;
+  }
+  chip.hidden = false;
+  chip.textContent = `残 ${formatUsd(remaining)}`;
+  chip.classList.toggle("low", tone === "low");
+  chip.classList.toggle("empty", tone === "empty");
+}
+
+function readCreditFields() {
+  return {
+    mgmtKey: sanitizeApiKey($("#inp-mgmtkey").value),
+    teamId: ($("#inp-teamid").value || "").trim(),
+    proxyBase: $("#inp-proxy").value.trim(),
+  };
+}
+
+async function refreshCredits({ force = false, silent = false, fromUi = false } = {}) {
+  if (fromUi) {
+    const fields = readCreditFields();
+    persistSettings(fields);
+    $("#inp-mgmtkey").value = fields.mgmtKey;
+  }
+  if (!sanitizeApiKey(settings().mgmtKey)) {
+    persistSettings({ creditSnapshot: null });
+    renderCreditUi();
+    if (!silent) toast("Management Key が空だよ", "error");
+    return;
+  }
+  const now = Date.now();
+  if (!force && lastCreditFetch && now - lastCreditFetch < CREDIT_MIN_MS) {
+    renderCreditUi();
+    return;
+  }
+  if (creditBusy) return;
+  creditBusy = true;
+  renderCreditUi();
+  try {
+    const snap = await fetchCreditBalance(settings());
+    lastCreditFetch = Date.now();
+    const patch = {
+      creditSnapshot: {
+        remainingUsd: snap.remainingUsd,
+        purchasedUsd: snap.purchasedUsd,
+        usedUsd: snap.usedUsd,
+        teamId: snap.teamId,
+        fetchedAt: snap.fetchedAt,
+      },
+    };
+    if (snap.teamIdDetected && snap.teamId && !String(settings().teamId || "").trim()) {
+      patch.teamId = snap.teamId;
+    }
+    persistSettings(patch);
+    if (patch.teamId) $("#inp-teamid").value = patch.teamId;
+    if (!silent) toast(`残 ${formatUsd(snap.remainingUsd)}`, "ok");
+  } catch (e) {
+    if (!silent) toast(String(e.message || e), "error");
+    const statusEl = $("#credit-status");
+    if (statusEl) statusEl.textContent = String(e.message || e);
+  } finally {
+    creditBusy = false;
+    renderCreditUi();
+  }
 }
 
 async function refreshModels() {
@@ -1219,6 +1340,7 @@ async function runGeneration() {
     await persistCurrent();
     renderMessages();
     await refreshLists();
+    refreshCredits({ silent: true });
     if (settings().autoSpeak && assistant.content) speakAssistant(assistant.content);
   } catch (e) {
     if (e.name === "AbortError") {
@@ -1565,16 +1687,25 @@ function bind() {
     persistSettings({
       apiKey,
       proxyBase: $("#inp-proxy").value.trim(),
+      ...readCreditFields(),
     });
     $("#inp-apikey").value = apiKey;
+    $("#inp-mgmtkey").value = settings().mgmtKey || "";
     toast(apiKey ? "キー保存した" : "キーが空だよ", apiKey ? "ok" : "error");
     await refreshModels();
+    if (settings().mgmtKey) refreshCredits({ force: true, silent: true });
+  });
+  $("#btn-credit").addEventListener("click", () => refreshCredits({ force: true, fromUi: true }));
+  $("#credit-chip").addEventListener("click", () => {
+    openDrawer("right");
+    $("#credit-box")?.scrollIntoView({ block: "nearest" });
   });
   $("#btn-probe").addEventListener("click", async () => {
     const apiKey = sanitizeApiKey($("#inp-apikey").value);
     persistSettings({
       apiKey,
       proxyBase: $("#inp-proxy").value.trim(),
+      ...readCreditFields(),
     });
     $("#inp-apikey").value = apiKey;
     try {
@@ -1722,6 +1853,9 @@ function bind() {
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") persistCurrent();
+    if (document.visibilityState === "visible" && settings().mgmtKey) {
+      refreshCredits({ silent: true });
+    }
   });
   window.addEventListener("pagehide", () => persistCurrent());
 }
@@ -1736,6 +1870,7 @@ async function init() {
   await refreshLists();
   renderMessages();
   await refreshModels();
+  if (settings().mgmtKey) refreshCredits({ silent: true });
   if (!settings().apiKey) {
     toast("右の⚙から xAI キーを入れてくれ");
   }

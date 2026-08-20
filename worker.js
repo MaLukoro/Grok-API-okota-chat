@@ -1,7 +1,9 @@
 /**
  * Cloudflare Worker 単体版。
  * - 静的ファイルは Pages / assets 側に任せるか、この Worker を /v1 プロキシ専用にする
- * - wrangler: このファイルをデプロイすると https://xxx.workers.dev/v1/* が api.x.ai に飛ぶ
+ * - wrangler: このファイルをデプロイすると
+ *   https://xxx.workers.dev/v1/*   → api.x.ai
+ *   https://xxx.workers.dev/mgmt/* → management-api.x.ai
  */
 export default {
   async fetch(req) {
@@ -9,13 +11,18 @@ export default {
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors(req) });
     }
-    if (!url.pathname.startsWith("/v1")) {
-      return new Response("Grok Kotatsu proxy. Use /v1/chat/completions", {
+    let target;
+    if (url.pathname.startsWith("/mgmt")) {
+      const rest = url.pathname.slice("/mgmt".length) || "/";
+      target = "https://management-api.x.ai" + rest + url.search;
+    } else if (url.pathname.startsWith("/v1")) {
+      target = "https://api.x.ai" + url.pathname + url.search;
+    } else {
+      return new Response("Grok Kotatsu proxy. Use /v1/* or /mgmt/*", {
         status: 404,
         headers: cors(req),
       });
     }
-    const target = "https://api.x.ai" + url.pathname + url.search;
     const headers = new Headers(req.headers);
     headers.delete("host");
     const init = { method: req.method, headers };

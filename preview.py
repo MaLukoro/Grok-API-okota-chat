@@ -37,7 +37,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_OPTIONS(self) -> None:
-        if self.path.startswith("/v1"):
+        if self.path.startswith("/v1") or self.path.startswith("/mgmt"):
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type")
@@ -48,17 +48,23 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path.startswith("/v1"):
-            self._proxy()
+            self._proxy("api.x.ai")
+            return
+        if self.path.startswith("/mgmt"):
+            self._proxy("management-api.x.ai", strip_prefix="/mgmt")
             return
         super().do_GET()
 
     def do_POST(self) -> None:
         if self.path.startswith("/v1"):
-            self._proxy()
+            self._proxy("api.x.ai")
+            return
+        if self.path.startswith("/mgmt"):
+            self._proxy("management-api.x.ai", strip_prefix="/mgmt")
             return
         self.send_error(404)
 
-    def _proxy(self) -> None:
+    def _proxy(self, host: str, strip_prefix: str = "") -> None:
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
         headers = {}
@@ -66,9 +72,14 @@ class Handler(SimpleHTTPRequestHandler):
             val = self.headers.get(key)
             if val:
                 headers[key] = val
-        conn = HTTPSConnection("api.x.ai", timeout=300)
+        path = self.path
+        if strip_prefix and path.startswith(strip_prefix):
+            path = path[len(strip_prefix) :] or "/"
+            if not path.startswith("/"):
+                path = "/" + path
+        conn = HTTPSConnection(host, timeout=300)
         try:
-            conn.request(self.command, self.path, body=body, headers=headers)
+            conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
             self.send_response(resp.status)
             ct = resp.getheader("Content-Type") or "application/octet-stream"

@@ -22,6 +22,9 @@ export const VOICES = [
 const DEFAULTS = {
   apiKey: "",
   proxyBase: "",
+  mgmtKey: "",
+  teamId: "",
+  creditSnapshot: null,
   model: "grok-4.20-0309-non-reasoning",
   temperature: 0.8,
   topP: 0.95,

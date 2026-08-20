@@ -254,3 +254,141 @@ export async function ttsSpeak(settings, { text, voiceId, language }) {
   if (!res.ok) throw new Error(await readError(res));
   return res.blob();
 }
+
+/** Management API。チャット用キーでは残高は取れない。 */
+const MGMT_DIRECT = "https://management-api.x.ai";
+
+export function resolveMgmtBase(settings) {
+  const custom = (settings.proxyBase || "").trim().replace(/\/+$/, "");
+  if (custom) {
+    if (custom.endsWith("/v1")) return `${custom.slice(0, -3)}/mgmt`;
+    return `${custom}/mgmt`;
+  }
+  if (hostHasLocalProxy()) return `${location.origin}/mgmt`;
+  return MGMT_DIRECT;
+}
+
+function mgmtAuthHeaders(settings) {
+  const key = sanitizeApiKey(settings.mgmtKey);
+  if (!key) {
+    throw new Error("Management Key が未設定だよ。チャット用キーとは別物。⚙ のクレジット欄に入れてくれ。");
+  }
+  return {
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+  };
+}
+
+async function mgmtFetchJson(settings, path) {
+  const url = `${resolveMgmtBase(settings)}${path.startsWith("/") ? path : `/${path}`}`;
+  let res;
+  try {
+    res = await fetch(url, { headers: mgmtAuthHeaders(settings) });
+  } catch (e) {
+    if (resolveMgmtBase(settings) === MGMT_DIRECT) {
+      throw new Error(
+        "残高APIがブラウザに弾かれた（CORS）。⚙ のプロキシURLに Worker を入れて、Worker も最新に上げ直してくれ。"
+      );
+    }
+    throw new Error(`残高の取得に失敗: ${e.message || e}`);
+  }
+  if (!res.ok) {
+    const detail = await readError(res);
+    if (res.status === 401) throw new Error("Management Key が違うか期限切れ。console.x.ai の Management Keys を見てくれ。");
+    if (res.status === 403) throw new Error("この Management Key に Billing を読む権限がない。キーの ACL を確認してくれ。");
+    if (res.status === 404) throw new Error(`Team ID が見つからない: ${detail}`);
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return res.json();
+}
+
+function centsToNumber(v) {
+  if (v == null) return null;
+  if (typeof v === "object" && v.val != null) v = v.val;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function usdAbsFromCents(cents) {
+  const n = centsToNumber(cents);
+  if (n == null) return null;
+  return Math.abs(n) / 100;
+}
+
+export function formatUsd(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return Number(n).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function parseCreditSnapshot(balance, invoice) {
+  const totalAbs = usdAbsFromCents(balance?.total);
+  const prepaidAbs = usdAbsFromCents(invoice?.coreInvoice?.prepaidCredits);
+  const usedUsd = usdAbsFromCents(invoice?.coreInvoice?.prepaidCreditsUsed) ?? 0;
+
+  const split = (pool) => {
+    if (pool == null) return null;
+    // pool が購入合計なら used を引く。すでに残量なら引かない。
+    if (usedUsd > 0.0001 && pool + 0.005 >= usedUsd) {
+      return { purchasedUsd: pool, remainingUsd: pool - usedUsd };
+    }
+    return {
+      remainingUsd: pool,
+      purchasedUsd: usedUsd > 0 ? pool + usedUsd : pool,
+    };
+  };
+
+  return { usedUsd, ...(split(totalAbs) || split(prepaidAbs) || { purchasedUsd: null, remainingUsd: null }) };
+}
+
+export async function validateMgmtKey(settings) {
+  return mgmtFetchJson(settings, "/auth/management-keys/validation");
+}
+
+export async function fetchCreditBalance(settings) {
+  let teamId = String(settings.teamId || "").trim();
+  let detected = false;
+  if (!teamId) {
+    const info = await validateMgmtKey(settings);
+    teamId = String(info.teamId || info.scopeId || "").trim();
+    detected = true;
+    if (!teamId) throw new Error("Management Key から Team ID が取れなかった。⚙ に Team ID を手で入れてくれ。");
+  }
+
+  const load = (tid) =>
+    Promise.all([
+      mgmtFetchJson(settings, `/v1/billing/teams/${encodeURIComponent(tid)}/prepaid/balance`),
+      mgmtFetchJson(settings, `/v1/billing/teams/${encodeURIComponent(tid)}/postpaid/invoice/preview`).catch(() => null),
+    ]);
+
+  let balance;
+  let invoice;
+  try {
+    [balance, invoice] = await load(teamId);
+  } catch (e) {
+    const msg = String(e.message || e);
+    if (!detected && /404|見つからない|not found/i.test(msg)) {
+      const info = await validateMgmtKey(settings);
+      const retryId = String(info.teamId || info.scopeId || "").trim();
+      if (retryId && retryId !== teamId) {
+        teamId = retryId;
+        detected = true;
+        [balance, invoice] = await load(teamId);
+      } else {
+        throw e;
+      }
+    } else {
+      throw e;
+    }
+  }
+
+  const snap = parseCreditSnapshot(balance, invoice);
+  if (snap.remainingUsd == null && snap.purchasedUsd == null) {
+    throw new Error("残高の数字がレスポンスから読めなかった");
+  }
+  return { ...snap, teamId, teamIdDetected: detected, fetchedAt: Date.now() };
+}
