@@ -276,6 +276,19 @@ function mergeChatKeepingImages(existing, incoming) {
   return { ...incoming, messages: nextMsgs };
 }
 
+export function dropImagePayloads(_key, value) {
+  if (typeof value === "string" && /^data:image\//i.test(value)) return undefined;
+  return value;
+}
+
+export function packToJson(pack) {
+  const json = JSON.stringify(pack, dropImagePayloads);
+  if (/data:image\//i.test(json)) {
+    throw new Error("画像の base64 がパックに残った。グリクに言え");
+  }
+  return json;
+}
+
 export async function exportPack({ omitImageData = false } = {}) {
   const db = await openDb();
   const [chats, projects, files] = await Promise.all([
@@ -288,7 +301,7 @@ export async function exportPack({ omitImageData = false } = {}) {
     app: "grok-kotatsu",
     version: 2,
     exported_at: nowSec(),
-    omit_image_data: omitImageData || undefined,
+    omit_image_data: !!omitImageData,
     chats: chatsOut,
     projects: projects || [],
     files: files || [],

@@ -1,6 +1,6 @@
 /** Google Drive バックアップ。OAuth はブラウザ完結（client secret なし）。 */
 
-import { exportPack, importPack } from "./db.js";
+import { exportPack, importPack, packToJson } from "./db.js";
 
 const TOKEN_KEY = "kotatsu_gdrive_token";
 const FOLDER_NAME = "GrokKotatsu";
@@ -162,7 +162,7 @@ export async function uploadToDrive(settings) {
   const name = fileNameFor(settings);
   const folderId = await ensureFolder();
   const existing = await findBackupFile(folderId, name);
-  const json = JSON.stringify(pack);
+  const json = packToJson(pack);
   if (existing) {
     await driveFetch(`/upload/drive/v3/files/${existing.id}?uploadType=media`, {
       method: "PATCH",

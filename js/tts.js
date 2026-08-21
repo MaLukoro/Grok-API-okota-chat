@@ -4,11 +4,40 @@ import { stripForSpeech } from "./util.js";
 import { ttsSpeak } from "./xai.js";
 
 let currentAudio = null;
+let sharedAudio = null;
 let speaking = false;
 let stopFlag = false;
 
 export function isSpeaking() {
   return speaking;
+}
+
+/** iOS はクリック直後に Audio / speechSynthesis を起こさないと、fetch のあと再生できない。 */
+export function unlockMedia() {
+  try {
+    if (!sharedAudio) {
+      sharedAudio = new Audio();
+      sharedAudio.playsInline = true;
+      sharedAudio.setAttribute("playsinline", "true");
+      sharedAudio.setAttribute("webkit-playsinline", "true");
+    }
+    const silent =
+      "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+    if (!speaking) {
+      sharedAudio.muted = true;
+      sharedAudio.src = silent;
+      const p = sharedAudio.play();
+      if (p && p.catch) p.catch(() => {});
+      sharedAudio.muted = false;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if ("speechSynthesis" in window) speechSynthesis.resume();
+  } catch {
+    /* ignore */
+  }
 }
 
 export function stopSpeak() {
@@ -17,7 +46,8 @@ export function stopSpeak() {
   try {
     if (currentAudio) {
       currentAudio.pause();
-      currentAudio.src = "";
+      currentAudio.removeAttribute("src");
+      currentAudio.load();
       currentAudio = null;
     }
   } catch {
@@ -52,8 +82,13 @@ function chunkText(text, max = 1800) {
 function playBlob(blob, speed) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
+    const audio = sharedAudio || new Audio();
+    sharedAudio = audio;
     currentAudio = audio;
+    audio.playsInline = true;
+    audio.setAttribute("playsinline", "true");
+    audio.setAttribute("webkit-playsinline", "true");
+    audio.muted = false;
     audio.playbackRate = speed || 1;
     audio.onended = () => {
       URL.revokeObjectURL(url);
@@ -62,8 +97,15 @@ function playBlob(blob, speed) {
     };
     audio.onerror = () => {
       URL.revokeObjectURL(url);
+      if (currentAudio === audio) currentAudio = null;
       reject(new Error("音声の再生に失敗した"));
     };
+    audio.src = url;
+    try {
+      audio.load();
+    } catch {
+      /* ignore */
+    }
     audio.play().catch(reject);
   });
 }
@@ -90,6 +132,7 @@ function speakBrowser(text, speed) {
 export async function speakText(settings, text, { onStart, onEnd } = {}) {
   stopSpeak();
   stopFlag = false;
+  unlockMedia();
   const chunks = chunkText(text);
   if (!chunks.length) return;
   speaking = true;
