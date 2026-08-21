@@ -16,7 +16,6 @@ import {
   relativeTime,
   renderSoftMarkdown,
   toast,
-  localizeReasoning,
 } from "./util.js";
 import { FALLBACK_MODELS, VOICES, loadSettings, maskKey, saveSettings } from "./settings.js";
 import {
@@ -37,7 +36,7 @@ import {
 import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
-import { speakText, stopSpeak, unlockMedia } from "./tts.js";
+import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
 import {
   assertClientId,
@@ -690,17 +689,6 @@ function syncTitle() {
   document.title = `${c?.title || "Grok Kotatsu"} · Kotatsu`;
 }
 
-function renderThinkHtml(reasoning, { streaming = false, hasContent = false } = {}) {
-  const text = localizeReasoning(reasoning);
-  if (!text) return "";
-  const open = streaming ? " open" : "";
-  const label = streaming && !hasContent ? "思考中…" : "思考過程";
-  return `<details class="msg-think"${open}>
-    <summary>${label}</summary>
-    <div class="msg-think-body">${escapeHtml(text)}</div>
-  </details>`;
-}
-
 function renderMessages({ scroll = true } = {}) {
   const box = $("#messages");
   const c = state.current;
@@ -721,16 +709,12 @@ function renderMessages({ scroll = true } = {}) {
     box.appendChild(empty);
     return;
   }
-  const lastIdx = c.messages.length - 1;
   box.innerHTML = c.messages
     .map((m, i) => {
       const role = m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "system";
       if (role === "system") return "";
-      const text = contentAsText(m.content);
-      const body = renderSoftMarkdown(text);
+      const body = renderSoftMarkdown(contentAsText(m.content));
       const atts = renderAttachmentsHtml(m);
-      const streamingHere = state.streaming && role === "assistant" && i === lastIdx;
-      const thinkHtml = renderThinkHtml(m.reasoning, { streaming: streamingHere, hasContent: !!text });
       const rag = m.rag
         ? m.rag.rag_enabled === false
           ? `<div class="rag-chip off">RAG OFF · 資料参照なし</div>`
@@ -742,36 +726,34 @@ function renderMessages({ scroll = true } = {}) {
       const editing = role === "user" && state.editingIndex === i;
       if (editing) {
         return `<article class="msg ${role} editing" data-i="${i}">
-          <div class="msg-role">まろ · 再編集中</div>
+          <div class="msg-role">まろ · 編集中</div>
           ${atts}
-          <textarea class="edit-input" data-edit-i="${i}" rows="3" enterkeyhint="enter">${escapeHtml(text)}</textarea>
+          <textarea class="edit-input" data-edit-i="${i}" rows="3">${escapeHtml(contentAsText(m.content))}</textarea>
           <div class="msg-actions">
             <button type="button" class="btn primary sm" data-act="edit-save" data-i="${i}">やり直す</button>
             <button type="button" class="btn ghost sm" data-act="edit-cancel">キャンセル</button>
           </div>
-          <div class="muted sm">送信は「やり直す」だけ。改行は Enter / Shift / Ctrl+Shift。このあとにある返答は消える。添付はそのまま。</div>
+          <div class="muted sm">このあとにある返答は消えて、ここから生成し直す。添付はそのまま残る。</div>
         </article>`;
       }
       const actions = state.streaming
         ? ""
         : role === "user"
           ? `<div class="msg-actions">
-              <button type="button" class="btn ghost xs" data-act="edit" data-i="${i}">✎ 再編集</button>
+              <button type="button" class="btn ghost xs" data-act="edit" data-i="${i}">✎ 編集</button>
             </div>`
           : `<div class="msg-actions">
               <button type="button" class="btn ghost xs" data-act="regen" data-i="${i}">🔄 再生成</button>
-              <button type="button" class="btn ghost xs" data-act="speak" data-i="${i}">🔊 読み上げ</button>
+              <button type="button" class="btn ghost xs" data-act="speak" data-i="${i}">🔊 Rex</button>
             </div>`;
-      const bodyHtml = text
+      const bodyHtml = body
         ? `<div class="msg-body">${body}</div>`
-        : atts || thinkHtml
-          ? streamingHere
-            ? `<div class="msg-body"><span class="muted">…</span></div>`
-            : ""
-          : `<div class="msg-body"><span class="muted">${streamingHere ? "…" : "（空）"}</span></div>`;
-      return `<article class="msg ${role}${streamingHere ? " streaming" : ""}" data-i="${i}">
+        : atts
+          ? ""
+          : `<div class="msg-body"><span class="muted">（空）</span></div>`;
+      return `<article class="msg ${role}" data-i="${i}">
         <div class="msg-role">${role === "user" ? "まろ" : "グリク"}</div>
-        ${thinkHtml}${atts}${bodyHtml}
+        ${atts}${bodyHtml}
         ${rag}${meta}${actions}
       </article>`;
     })
@@ -789,69 +771,6 @@ function renderMessages({ scroll = true } = {}) {
   if (scroll) box.scrollTop = box.scrollHeight;
 }
 
-function patchStreamingAssistant(assistant) {
-  const article = $("#messages .msg.assistant:last-child");
-  if (!article) {
-    renderMessages();
-    return;
-  }
-  article.classList.add("streaming");
-  const text = contentAsText(assistant.content);
-  const localized = localizeReasoning(assistant.reasoning || "");
-  let think = article.querySelector(".msg-think");
-  if (localized) {
-    if (!think) {
-      think = document.createElement("details");
-      think.className = "msg-think";
-      think.innerHTML = `<summary></summary><div class="msg-think-body"></div>`;
-      const roleEl = article.querySelector(".msg-role");
-      if (roleEl) roleEl.after(think);
-      else article.prepend(think);
-    }
-    think.open = true;
-    const sum = think.querySelector("summary");
-    if (sum) sum.textContent = text ? "思考過程" : "思考中…";
-    const bodyEl = think.querySelector(".msg-think-body");
-    if (bodyEl) bodyEl.textContent = localized;
-  }
-  let body = article.querySelector(".msg-body");
-  if (text) {
-    if (!body) {
-      body = document.createElement("div");
-      body.className = "msg-body";
-      const after = think || article.querySelector(".msg-atts") || article.querySelector(".msg-role");
-      if (after) after.after(body);
-      else article.appendChild(body);
-    }
-    body.innerHTML = renderSoftMarkdown(text);
-  } else if (body && !think) {
-    body.innerHTML = `<span class="muted">…</span>`;
-  } else if (body && localized) {
-    body.innerHTML = `<span class="muted">…</span>`;
-  }
-  const box = $("#messages");
-  box.scrollTop = box.scrollHeight;
-}
-
-function insertNewline(ta) {
-  if (!ta) return;
-  const start = ta.selectionStart ?? ta.value.length;
-  const end = ta.selectionEnd ?? ta.value.length;
-  const v = ta.value;
-  ta.value = `${v.slice(0, start)}\n${v.slice(end)}`;
-  const pos = start + 1;
-  try {
-    ta.setSelectionRange(pos, pos);
-  } catch {
-    /* ignore */
-  }
-  autoResize(ta);
-}
-
-function isImeKey(e) {
-  return !!(e.isComposing || e.keyCode === 229);
-}
-
 function applyFind(q) {
   const query = (q || "").trim().toLowerCase();
   const nodes = $$(".msg");
@@ -865,8 +784,7 @@ function applyFind(q) {
   nodes.forEach((el) => {
     const i = Number(el.dataset.i);
     const m = state.current?.messages?.[i];
-    const blob = `${messagePlainText(m)}\n${m?.reasoning || ""}`;
-    const hit = blob.toLowerCase().includes(query);
+    const hit = messagePlainText(m).toLowerCase().includes(query);
     el.classList.toggle("hit", hit);
     if (hit) {
       n += 1;
@@ -1305,23 +1223,6 @@ function startEditUser(i) {
   renderMessages({ scroll: false });
 }
 
-function reeditLastUser() {
-  if (state.streaming) return;
-  const msgs = state.current?.messages || [];
-  let i = -1;
-  for (let k = msgs.length - 1; k >= 0; k--) {
-    if (msgs[k].role === "user") {
-      i = k;
-      break;
-    }
-  }
-  if (i < 0) {
-    toast("直す入力がない", "error");
-    return;
-  }
-  startEditUser(i);
-}
-
 function cancelEdit() {
   state.editingIndex = null;
   renderMessages({ scroll: false });
@@ -1410,7 +1311,6 @@ async function runGeneration() {
   $("#btn-stop").hidden = false;
   $("#btn-send").disabled = true;
   if ($("#btn-regen-last")) $("#btn-regen-last").disabled = true;
-  if ($("#btn-reedit-last")) $("#btn-reedit-last").disabled = true;
   const t0 = performance.now();
 
   try {
@@ -1426,16 +1326,17 @@ async function runGeneration() {
       },
       {
         signal: ac.signal,
-        onDelta: (full, reason) => {
+        onDelta: (full) => {
           assistant.content = full;
-          if (reason) assistant.reasoning = localizeReasoning(reason);
-          patchStreamingAssistant(assistant);
+          const last = $("#messages .msg.assistant:last-child .msg-body");
+          if (last) last.innerHTML = renderSoftMarkdown(full);
+          else renderMessages();
+          const box = $("#messages");
+          box.scrollTop = box.scrollHeight;
         },
       }
     );
     assistant.content = result.content || assistant.content;
-    if (result.reasoning) assistant.reasoning = localizeReasoning(result.reasoning);
-    else if (assistant.reasoning) assistant.reasoning = localizeReasoning(assistant.reasoning);
     const elapsed = Math.round(performance.now() - t0);
     const usage = result.usage || {};
     assistant.meta = {
@@ -1466,7 +1367,6 @@ async function runGeneration() {
     $("#btn-stop").hidden = true;
     $("#btn-send").disabled = false;
     if ($("#btn-regen-last")) $("#btn-regen-last").disabled = false;
-    if ($("#btn-reedit-last")) $("#btn-reedit-last").disabled = false;
   }
 }
 
@@ -1479,7 +1379,6 @@ function stopGeneration() {
 }
 
 function speakAssistant(text) {
-  unlockMedia();
   $("#btn-speak-last").hidden = true;
   $("#btn-stop-speak").hidden = false;
   speakText(settings(), text, {
@@ -1637,13 +1536,10 @@ function bind() {
     if (e.key === "Escape") {
       e.preventDefault();
       cancelEdit();
-      return;
     }
-    if (e.key !== "Enter" || isImeKey(e)) return;
-    // やり直すはボタンのみ。Shift / Ctrl+Shift / Ctrl+Enter は改行。
-    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) {
       e.preventDefault();
-      insertNewline(ta);
+      commitEditUser(Number(ta.dataset.editI));
     }
   });
   $("#messages").addEventListener("input", (e) => {
@@ -1738,16 +1634,12 @@ function bind() {
 
   $("#btn-send").addEventListener("click", sendMessage);
   $("#btn-regen-last").addEventListener("click", regenerateLast);
-  $("#btn-reedit-last")?.addEventListener("click", reeditLastUser);
   $("#btn-stop").addEventListener("click", stopGeneration);
   $("#input").addEventListener("input", () => autoResize($("#input")));
   $("#input").addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" || isImeKey(e)) return;
-    // 送信はボタンのみ。iOSキーパッドの改行はブラウザに任せる。
-    // PC の Shift / Ctrl+Shift / Ctrl+Enter は改行を明示挿入。
-    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      insertNewline(e.target);
+      sendMessage();
     }
   });
 

@@ -163,17 +163,6 @@ export function stripForSpeech(text) {
     .trim();
 }
 
-/** 思考過程の中の「ユーザー」を、最初からまろに読み替える。 */
-export function localizeReasoning(text) {
-  return String(text ?? "")
-    .replace(/ユーザー(?:さん|様)?/g, "まろ")
-    .replace(/ユーザ(?:さん|様)?/g, "まろ")
-    .replace(/\b[Tt]he users\b/g, "まろたち")
-    .replace(/\b[Tt]he user(?:'s|’s)?\b/g, (m) => (/['’]s$/i.test(m) ? "まろの" : "まろ"))
-    .replace(/\bUsers\b/g, "まろたち")
-    .replace(/\bUser(?:'s|’s)?\b/g, (m) => (/['’]s$/.test(m) ? "まろの" : "まろ"));
-}
-
 export function formatGenMeta(meta) {
   if (!meta) return "";
   const parts = [];

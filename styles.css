@@ -304,44 +304,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .md-pre { padding: 10px; overflow: auto; }
 .msg.hit { outline: 1px solid var(--accent); }
 .msg-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.msg-actions .btn {
-  min-height: 36px;
-}
 .msg.editing { border-color: rgba(232, 160, 90, 0.45); }
-.msg-think {
-  margin: 0 0 10px;
-  background: var(--bg0);
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-}
-.msg-think summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 8px 10px;
-  min-height: 40px;
-  font-size: 12px;
-  color: var(--text-mute);
-  letter-spacing: 0.04em;
-  user-select: none;
-}
-.msg-think summary::-webkit-details-marker { display: none; }
-.msg-think summary::before { content: "▸ "; }
-.msg-think[open] summary::before { content: "▾ "; }
-.msg-think-body {
-  white-space: pre-wrap;
-  word-break: break-word;
-  padding: 0 10px 10px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-dim);
-  max-height: 280px;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  font-family: var(--mono);
-}
-.msg.assistant.streaming .msg-think {
-  border-color: rgba(232, 160, 90, 0.35);
-}
 .edit-input {
   width: 100%;
   min-height: 72px;
@@ -713,16 +676,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   #backdrop[hidden] { display: none; }
   .composer-row { flex-wrap: wrap; }
   .composer-row #input { min-width: 0; flex: 1 1 140px; }
-  .composer-actions { margin-left: auto; flex-wrap: wrap; }
-  .composer-actions .btn {
-    min-height: 44px;
-    padding: 8px 12px;
-  }
-  .msg-actions .btn {
-    min-height: 44px;
-    padding: 8px 12px;
-    font-size: 14px;
-  }
+  .composer-actions { margin-left: auto; }
   .mobile-only { display: inline-flex; }
   .mobile-drawer-head {
     display: flex;
