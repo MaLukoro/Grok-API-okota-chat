@@ -79,6 +79,23 @@ export function autoResize(el) {
   el.style.height = `${Math.min(el.scrollHeight, max)}px`;
 }
 
+/** iPhone / iPad。iPadOS が Mac の UA を名乗るやつも拾う。 */
+export function isIos() {
+  const ua = navigator.userAgent || "";
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
+}
+
+/** 物理キーボードの Shift+Enter が使えない端末。Enter は改行、送信はボタン。 */
+export function prefersNewlineOnEnter() {
+  if (isIos()) return true;
+  try {
+    return window.matchMedia("(pointer: coarse)").matches;
+  } catch {
+    return false;
+  }
+}
+
 export function toast(msg, type = "") {
   const el = $("#toast");
   if (!el) {

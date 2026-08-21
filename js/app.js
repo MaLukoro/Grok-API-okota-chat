@@ -13,6 +13,7 @@ import {
   isDefaultTitle,
   makeId,
   nowSec,
+  prefersNewlineOnEnter,
   relativeTime,
   renderSoftMarkdown,
   toast,
@@ -1637,10 +1638,11 @@ function bind() {
   $("#btn-stop").addEventListener("click", stopGeneration);
   $("#input").addEventListener("input", () => autoResize($("#input")));
   $("#input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      sendMessage();
-    }
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    // iOS のソフトウェアキーボードに Shift は無い。Enter を送信にすると改行できない。
+    if (prefersNewlineOnEnter()) return;
+    e.preventDefault();
+    sendMessage();
   });
 
   $("#btn-rag-sources").addEventListener("click", (e) => {

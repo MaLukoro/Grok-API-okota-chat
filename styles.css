@@ -362,6 +362,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: transparent;
   min-height: 44px;
   max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
   font-size: 16px;
   line-height: 1.45;
   outline: none;
