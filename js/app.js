@@ -744,7 +744,6 @@ function renderMessages({ scroll = true } = {}) {
               <button type="button" class="btn ghost xs" data-act="edit" data-i="${i}">✎ 編集</button>
             </div>`
           : `<div class="msg-actions">
-              <button type="button" class="btn ghost xs" data-act="regen" data-i="${i}">🔄 再生成</button>
               <button type="button" class="btn ghost xs" data-act="speak" data-i="${i}">🔊 Rex</button>
             </div>`;
       const bodyHtml = body
@@ -1173,49 +1172,6 @@ function confirmTruncate(keepThroughIndex, reason) {
   return confirm(`${reason}\nこのあと ${extra} 件が消える。いい？`);
 }
 
-async function regenerateAt(i) {
-  if (state.streaming) return;
-  const chat = state.current;
-  if (!chat) return;
-  const m = chat.messages[i];
-  if (!m || m.role !== "assistant") return;
-  if (!settings().apiKey) {
-    toast("先に API キーを入れてくれ", "error");
-    openDrawer("right");
-    return;
-  }
-  if (!confirmTruncate(i - 1, "この返答からやり直す。")) return;
-  state.editingIndex = null;
-  chat.messages = chat.messages.slice(0, i);
-  await persistCurrent();
-  renderMessages();
-  await runGeneration();
-}
-
-async function regenerateLast() {
-  if (state.streaming) return;
-  const msgs = state.current?.messages || [];
-  if (!msgs.length) {
-    toast("やり直す返答がない", "error");
-    return;
-  }
-  const last = msgs[msgs.length - 1];
-  if (last.role === "assistant") {
-    await regenerateAt(msgs.length - 1);
-    return;
-  }
-  if (last.role === "user") {
-    if (!settings().apiKey) {
-      toast("先に API キーを入れてくれ", "error");
-      openDrawer("right");
-      return;
-    }
-    await runGeneration();
-    return;
-  }
-  toast("やり直す返答がない", "error");
-}
-
 function startEditUser(i) {
   if (state.streaming) return;
   const m = state.current?.messages?.[i];
@@ -1311,7 +1267,6 @@ async function runGeneration() {
   state.abort = ac;
   $("#btn-stop").hidden = false;
   $("#btn-send").disabled = true;
-  if ($("#btn-regen-last")) $("#btn-regen-last").disabled = true;
   const t0 = performance.now();
 
   try {
@@ -1367,7 +1322,6 @@ async function runGeneration() {
     state.abort = null;
     $("#btn-stop").hidden = true;
     $("#btn-send").disabled = false;
-    if ($("#btn-regen-last")) $("#btn-regen-last").disabled = false;
   }
 }
 
@@ -1521,7 +1475,6 @@ function bind() {
     if (act === "edit") startEditUser(i);
     if (act === "edit-cancel") cancelEdit();
     if (act === "edit-save") commitEditUser(i);
-    if (act === "regen") regenerateAt(i);
     if (act === "speak") {
       const m = state.current?.messages?.[i];
       if (m) speakAssistant(contentAsText(m.content));
@@ -1634,7 +1587,6 @@ function bind() {
   });
 
   $("#btn-send").addEventListener("click", sendMessage);
-  $("#btn-regen-last").addEventListener("click", regenerateLast);
   $("#btn-stop").addEventListener("click", stopGeneration);
   $("#input").addEventListener("input", () => autoResize($("#input")));
   $("#input").addEventListener("keydown", (e) => {

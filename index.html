@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=16" />
+  <link rel="stylesheet" href="./styles.css?v=17" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -148,12 +148,6 @@
             <input id="attach-file" type="file" hidden multiple accept=".md,.markdown,image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" />
             <textarea id="input" rows="1" enterkeyhint="enter" placeholder="メッセージを入力… .md / 画像を添付できる"></textarea>
             <div class="composer-actions">
-              <button
-                id="btn-regen-last"
-                class="btn ghost sm"
-                type="button"
-                title="最後の返答を再生成"
-              >🔄 再生成</button>
               <button id="btn-stop" class="btn danger sm" type="button" hidden>停止</button>
               <button id="btn-send" class="btn primary" type="button">送信</button>
             </div>
@@ -339,7 +333,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=16"></script>
+  <script type="module" src="./js/app.js?v=17"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -349,7 +343,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=16").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=17").catch(() => {});
       });
     }
   </script>
