@@ -505,7 +505,6 @@ async function openProject(id) {
   state.activeProjectId = id;
   state.ragSelectedSources = null;
   await refreshLists();
-  closeDrawers();
 }
 
 async function leaveProject() {
