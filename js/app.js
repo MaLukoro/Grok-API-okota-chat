@@ -1624,17 +1624,35 @@ function bind() {
   $("#backdrop").addEventListener("click", closeDrawers);
   $$(".drawer-close").forEach((b) => b.addEventListener("click", closeDrawers));
 
+  const closeFindBar = () => {
+    const bar = $("#find-bar");
+    const inp = $("#find-input");
+    if (bar) bar.hidden = true;
+    if (inp) {
+      inp.value = "";
+      inp.blur();
+    }
+    applyFind("");
+  };
   $("#btn-find").addEventListener("click", () => {
     const bar = $("#find-bar");
-    bar.hidden = !bar.hidden;
-    if (!bar.hidden) $("#find-input").focus();
-    else applyFind("");
+    if (!bar) return;
+    if (bar.hidden) {
+      bar.hidden = false;
+      $("#find-input")?.focus();
+    } else {
+      closeFindBar();
+    }
   });
-  $("#btn-find-close").addEventListener("click", () => {
-    $("#find-bar").hidden = true;
-    applyFind("");
+  $("#btn-find-close").addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeFindBar();
   });
   $("#find-input").addEventListener("input", () => applyFind($("#find-input").value));
+  $("#find-input").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeFindBar();
+  });
 
   $("#btn-speak-last").addEventListener("click", () => {
     const last = [...(state.current?.messages || [])].reverse().find((m) => m.role === "assistant");

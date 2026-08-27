@@ -243,6 +243,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--bg2);
   border-bottom: 1px solid var(--border-soft);
 }
+.find-bar[hidden] {
+  display: none !important;
+}
 .find-bar input {
   flex: 1;
   background: var(--bg0);
@@ -333,7 +336,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .rag-chip.off { opacity: 0.7; }
 
-.composer-wrap { padding: 8px 12px calc(10px + var(--safe-bottom)); }
+/* 下の safe-area は #app の padding-bottom が担当。ここでも足すと iOS で入力欄が浮く */
+.composer-wrap { padding: 8px 12px 6px; }
 .composer {
   display: flex;
   flex-direction: column;
@@ -676,6 +680,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
     z-index: 25;
   }
   #backdrop[hidden] { display: none; }
+  .composer-wrap { padding: 4px 10px 2px; }
+  .composer-meta { margin-top: 4px; }
   .composer-row { flex-wrap: wrap; }
   .composer-row #input { min-width: 0; flex: 1 1 140px; }
   .composer-actions { margin-left: auto; }
