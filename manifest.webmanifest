@@ -1,12 +1,12 @@
 {
   "name": "Grok Kotatsu",
   "short_name": "Kotatsu",
-  "description": "Grok API専用・おこた長編チャット",
+  "description": "Grok API専用・宇宙のこたつ長編チャット",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#140e0c",
-  "theme_color": "#140e0c",
+  "background_color": "#070b16",
+  "theme_color": "#070b16",
   "orientation": "portrait-primary",
   "icons": [
     {

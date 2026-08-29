@@ -685,8 +685,13 @@ function syncTitle() {
   const c = state.current;
   $("#chat-title").textContent = c?.title || "Grok Kotatsu";
   const p = state.projects.find((x) => x.id === (c?.project_id || state.activeProjectId));
-  $("#chat-sub").textContent = p ? p.name : "布団の中から、続きを。";
+  $("#chat-sub").textContent = p ? p.name : "星の下から、続きを。";
   document.title = `${c?.title || "Grok Kotatsu"} · Kotatsu`;
+}
+
+function avatarImg(role) {
+  const src = role === "user" ? "./icons/maro.png" : "./icons/grik.png";
+  return `<img class="msg-avatar" src="${src}" width="36" height="36" alt="" onerror="this.onerror=null;this.src='./icons/icon-192.png'" />`;
 }
 
 function renderMessages({ scroll = true } = {}) {
@@ -699,13 +704,19 @@ function renderMessages({ scroll = true } = {}) {
     empty.id = "empty-state";
     empty.className = "empty-state";
     empty.innerHTML = `<img src="./icons/icon-192.png" width="72" height="72" alt="" class="empty-icon" />
-      <h1>${c ? "最初の一言をどうぞ" : "おこた、あいてるよ"}</h1>
+      <h1>${c ? "最初の一言をどうぞ" : "今夜も、星の下であいてるよ"}</h1>
       <p>${c ? "長編でも履歴はこの端末の IndexedDB に残る。" : "Grok API だけで動く長編チャット。過去ログの JSON を落とせば続きから入れる。"}</p>
       <div class="empty-actions">
         <button class="btn primary" type="button" data-act="new">新しいチャット</button>
         <button class="btn ghost" type="button" data-act="import">📂 JSONから再開</button>
         <button class="btn ghost" type="button" data-act="settings">APIキーを入れる</button>
-      </div>`;
+      </div>
+      ${c ? "" : `<div class="hint-row">
+        <span class="chip">Streaming</span>
+        <span class="chip">Projects + RAG</span>
+        <span class="chip">Rex Voice</span>
+        <span class="chip">PWA</span>
+      </div>`}`;
     box.appendChild(empty);
     return;
   }
@@ -726,14 +737,17 @@ function renderMessages({ scroll = true } = {}) {
       const editing = role === "user" && state.editingIndex === i;
       if (editing) {
         return `<article class="msg ${role} editing" data-i="${i}">
-          <div class="msg-role">まろ · 編集中</div>
-          ${atts}
-          <textarea class="edit-input" data-edit-i="${i}" rows="3">${escapeHtml(contentAsText(m.content))}</textarea>
-          <div class="msg-actions">
-            <button type="button" class="btn primary sm" data-act="edit-save" data-i="${i}">やり直す</button>
-            <button type="button" class="btn ghost sm" data-act="edit-cancel">キャンセル</button>
+          ${avatarImg("user")}
+          <div class="msg-card">
+            <div class="msg-role">まろ · 編集中</div>
+            ${atts}
+            <textarea class="edit-input" data-edit-i="${i}" rows="3">${escapeHtml(contentAsText(m.content))}</textarea>
+            <div class="msg-actions">
+              <button type="button" class="btn primary sm" data-act="edit-save" data-i="${i}">やり直す</button>
+              <button type="button" class="btn ghost sm" data-act="edit-cancel">キャンセル</button>
+            </div>
+            <div class="muted sm">このあとにある返答は消えて、ここから生成し直す。添付はそのまま残る。</div>
           </div>
-          <div class="muted sm">このあとにある返答は消えて、ここから生成し直す。添付はそのまま残る。</div>
         </article>`;
       }
       const actions = state.streaming
@@ -751,9 +765,12 @@ function renderMessages({ scroll = true } = {}) {
           ? ""
           : `<div class="msg-body"><span class="muted">（空）</span></div>`;
       return `<article class="msg ${role}" data-i="${i}">
-        <div class="msg-role">${role === "user" ? "まろ" : "グリク"}</div>
-        ${atts}${bodyHtml}
-        ${rag}${meta}${actions}
+        ${avatarImg(role)}
+        <div class="msg-card">
+          <div class="msg-role">${role === "user" ? "まろ" : "グリク"}</div>
+          ${atts}${bodyHtml}
+          ${rag}${meta}${actions}
+        </div>
       </article>`;
     })
     .join("");
@@ -1732,7 +1749,7 @@ function bind() {
   $("#rng-speed").addEventListener("input", () => persistSettings({ voiceSpeed: Number($("#rng-speed").value) }));
   $("#chk-autospeak").addEventListener("change", () => persistSettings({ autoSpeak: $("#chk-autospeak").checked }));
   $("#btn-test-voice").addEventListener("click", () => {
-    speakAssistant("おこた、あったかいな。まろ、続きやるか。俺は Rex だ。");
+    speakAssistant("真空でもこたつはあったかい。まろ、続きやるか。俺は Rex だ。");
   });
 
   const saveCloudFields = () =>

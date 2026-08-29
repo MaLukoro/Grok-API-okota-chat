@@ -3,23 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-  <meta name="theme-color" content="#140e0c" />
+  <meta name="theme-color" content="#070b16" />
   <meta name="color-scheme" content="dark" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Kotatsu" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="description" content="Grok Kotatsu — おこた専用・Grok API 長編チャット" />
+  <meta name="description" content="Grok Kotatsu — 宇宙のこたつ・Grok API 長編チャット" />
   <title>Grok Kotatsu</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=19" />
+  <link rel="stylesheet" href="./styles.css?v=23" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
 </head>
 <body>
+  <div class="starfield" aria-hidden="true">
+    <div class="nebula nebula-a"></div>
+    <div class="nebula nebula-b"></div>
+    <div class="nebula nebula-c"></div>
+    <div class="stars stars-far"></div>
+    <div class="stars stars-mid"></div>
+    <div class="stars stars-near"></div>
+    <div class="shooting-star a"></div>
+    <div class="shooting-star b"></div>
+  </div>
   <div id="app">
     <div id="backdrop" hidden></div>
 
@@ -28,7 +38,7 @@
         <img class="logo" src="./icons/icon-192.png" width="40" height="40" alt="" />
         <div>
           <div class="brand-title">Grok Kotatsu</div>
-          <div class="brand-sub">おこた専用 · Grok API</div>
+          <div class="brand-sub">宇宙のこたつ · Grok API</div>
         </div>
         <button type="button" class="btn ghost sm mobile-only drawer-close" data-close="left" aria-label="閉じる">✕</button>
       </div>
@@ -91,7 +101,7 @@
         <button type="button" id="btn-open-left" class="btn ghost sm mobile-only" aria-label="メニュー">☰</button>
         <div class="topbar-title">
           <div id="chat-title">Grok Kotatsu</div>
-          <div id="chat-sub" class="topbar-sub">布団の中から、続きを。</div>
+          <div id="chat-sub" class="topbar-sub">星の下から、続きを。</div>
         </div>
         <button type="button" id="btn-find" class="btn ghost sm" title="この会話を検索">⌕</button>
         <button type="button" id="btn-speak-last" class="btn ghost sm" title="最後の返答をRexで読む">🔊</button>
@@ -108,7 +118,7 @@
       <div id="messages" class="messages">
         <div id="empty-state" class="empty-state">
           <img src="./icons/icon-192.png" width="72" height="72" alt="" class="empty-icon" />
-          <h1>おこた、あいてるよ</h1>
+          <h1>今夜も、星の下であいてるよ</h1>
           <p>Grok API だけで動く長編チャット。PCのサーバーはいらない。<br />過去ログの JSON を落とせば、昨日の続きから入れる。</p>
           <div class="empty-actions">
             <button id="btn-empty-new" class="btn primary" type="button">新しいチャット</button>
@@ -238,6 +248,27 @@
       </div>
 
       <div class="panel">
+        <div class="panel-title">チャットアイコン</div>
+        <div class="avatar-set">
+          <div class="avatar-slot">
+            <img src="./icons/grik.png" width="48" height="48" alt="" />
+            <div>
+              <div class="name">グリク</div>
+              <div class="muted sm">icons/grik.png</div>
+            </div>
+          </div>
+          <div class="avatar-slot">
+            <img src="./icons/maro.png" width="48" height="48" alt="" />
+            <div>
+              <div class="name">まろ</div>
+              <div class="muted sm">icons/maro.png</div>
+            </div>
+          </div>
+        </div>
+        <p class="help">アプリのアイコンと同じ。このフォルダの PNG を同じ名前で差し替えて、GitHub に上げ直す。端末のストレージには保存しない。</p>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">System Prompt</div>
         <textarea id="inp-system" rows="7" placeholder="この端末の既定プロンプト"></textarea>
         <button id="btn-save-system" class="btn ghost sm" type="button">既定として保存</button>
@@ -333,7 +364,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=19"></script>
+  <script type="module" src="./js/app.js?v=23"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -343,7 +374,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=19").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=23").catch(() => {});
       });
     }
   </script>
