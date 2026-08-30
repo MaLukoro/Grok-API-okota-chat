@@ -910,10 +910,20 @@ input[type="range"] { accent-color: var(--accent); }
 
 .attach-preview {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.attach-preview[hidden] { display: none; }
+.att-chips {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.attach-preview[hidden] { display: none; }
+.att-oneshot-hint {
+  color: var(--text-mute);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .att-chip {
   display: flex;
   align-items: center;

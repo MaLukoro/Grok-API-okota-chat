@@ -832,19 +832,6 @@ function messagePlainText(m) {
   return bits.filter(Boolean).join("\n");
 }
 
-function countMessageImages(m) {
-  let n = 0;
-  for (const a of m?.attachments || []) {
-    if (a?.kind === "image" && a.dataUrl) n += 1;
-  }
-  if (Array.isArray(m?.content)) {
-    for (const p of m.content) {
-      if (p?.image_url?.url || (p?.type === "image_url" && p.url)) n += 1;
-    }
-  }
-  return n;
-}
-
 function toApiContent(m, { includeImages = true } = {}) {
   const atts = Array.isArray(m.attachments) ? m.attachments : [];
   const mdBlocks = atts
@@ -876,9 +863,17 @@ function toApiContent(m, { includeImages = true } = {}) {
     }
   } else {
     const names = atts.filter((a) => a.kind === "image").map((a) => a.name).filter(Boolean);
+    if (!names.length && Array.isArray(m.content)) {
+      let n = 0;
+      for (const p of m.content) {
+        if (p?.image_url?.url || (p?.type === "image_url" && p.url)) n += 1;
+      }
+      if (n) names.push(n === 1 ? "画像" : `画像×${n}`);
+    }
     if (names.length) text = [text, `（画像: ${names.join(", ")}）`].filter(Boolean).join("\n");
   }
 
+  if (imageParts.length > MAX_API_IMAGES) imageParts.length = MAX_API_IMAGES;
   if (!imageParts.length) return text;
   const parts = [];
   if (text) parts.push({ type: "text", text });
@@ -907,20 +902,18 @@ function buildApiMessages(chat, extraSystem) {
   }
   acc.reverse();
 
-  let imagesLeft = MAX_API_IMAGES;
-  const keepImg = acc.map(() => false);
+  // 画像は今のユーザー発言だけ API に乗せる。過去ターンはピクセルを送らず文字スタブ。
+  let lastUserIdx = -1;
   for (let i = acc.length - 1; i >= 0; i--) {
-    if (acc[i].role !== "user") continue;
-    const n = countMessageImages(acc[i]);
-    if (n && imagesLeft > 0) {
-      keepImg[i] = true;
-      imagesLeft -= n;
+    if (acc[i].role === "user") {
+      lastUserIdx = i;
+      break;
     }
   }
   return out.concat(
     acc.map((m, i) => ({
       role: m.role,
-      content: toApiContent(m, { includeImages: !!keepImg[i] }),
+      content: toApiContent(m, { includeImages: i === lastUserIdx }),
     }))
   );
 }
@@ -973,7 +966,7 @@ function renderAttachPreview() {
     return;
   }
   box.hidden = false;
-  box.innerHTML = atts
+  const chips = atts
     .map((a, i) => {
       if (a.kind === "image") {
         return `<div class="att-chip image">
@@ -991,6 +984,12 @@ function renderAttachPreview() {
       </div>`;
     })
     .join("");
+  const hasImage = atts.some((a) => a.kind === "image");
+  box.innerHTML = `<div class="att-chips">${chips}</div>${
+    hasImage
+      ? `<div class="att-oneshot-hint">画像はこの返信だけ見る。次のターンからは乗せない</div>`
+      : ""
+  }`;
 }
 
 function openAttZoom(src) {

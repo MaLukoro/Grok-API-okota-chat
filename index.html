@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=24" />
+  <link rel="stylesheet" href="./styles.css?v=25" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -364,7 +364,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=24"></script>
+  <script type="module" src="./js/app.js?v=25"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -374,7 +374,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=24").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=25").catch(() => {});
       });
     }
   </script>
