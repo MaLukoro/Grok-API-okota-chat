@@ -63,7 +63,7 @@ const state = {
   current: null,
   streaming: false,
   abort: null,
-  ragSelectedSources: null, // null=全 / []=オフ / names
+  ragSelectedSources: [], // null=全 / []=オフ（既定） / names
   findHits: [],
   editingIndex: null,
   pendingAttachments: [],
@@ -503,14 +503,14 @@ async function openProject(id) {
     return;
   }
   state.activeProjectId = id;
-  state.ragSelectedSources = null;
+  state.ragSelectedSources = [];
   await refreshLists();
 }
 
 async function leaveProject() {
   await flushProjectSystemPrompt();
   state.activeProjectId = null;
-  state.ragSelectedSources = null;
+  state.ragSelectedSources = [];
   await refreshLists();
 }
 
@@ -520,6 +520,7 @@ async function createProject() {
   await flushProjectSystemPrompt();
   const p = await saveProject(emptyProject({ name: name.trim() }));
   state.activeProjectId = p.id;
+  state.ragSelectedSources = [];
   await refreshLists();
   const sec = $("#sec-prompt");
   if (sec) sec.open = true;
@@ -1476,7 +1477,7 @@ function bind() {
     await flushProjectSystemPrompt();
     await deleteProject(p.id);
     state.activeProjectId = null;
-    state.ragSelectedSources = null;
+    state.ragSelectedSources = [];
     await refreshLists();
     toast("プロジェクト消した", "ok");
   });
