@@ -329,19 +329,12 @@ export function formatUsd(n) {
 
 /**
  * usage 集計の年月。
- * invoice.billingCycle.year が壁時計とズレることがある（実測: 2026-09 なのに 2025-09）。
- * 年が今と一致するときだけ invoice の月を信じ、それ以外は UTC 今月。
+ * invoice.billingCycle.year は信用しない（実測: 壁時計 2026-09 なのに 2025-09 が返る）。
+ * コンソールのライブ残に合わせるため、常に UTC の今月で集計する。
  */
-export function resolveBillingCycle(cycle) {
+export function resolveBillingCycle(_cycle) {
   const now = new Date();
-  const nowY = now.getUTCFullYear();
-  const nowM = now.getUTCMonth() + 1;
-  const year = Number(cycle?.year);
-  const month = Number(cycle?.month);
-  if (year === nowY && Number.isInteger(month) && month >= 1 && month <= 12) {
-    return { year, month };
-  }
-  return { year: nowY, month: nowM };
+  return { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
 }
 
 function cycleTimeRange({ year, month }) {
@@ -416,11 +409,14 @@ export function parseCreditSnapshot(balance, invoice, cycleUsageUsd = null) {
 async function fetchCycleUsageUsd(settings, teamId, cycle) {
   const timeRange = cycleTimeRange(cycle);
   const path = `/v1/billing/teams/${encodeURIComponent(teamId)}/usage`;
+  // DAY+description を先に（NONE+空 groupBy は通っても過小合計になることがある）
   const attempts = [
-    { timeUnit: "TIME_UNIT_NONE", groupBy: [] },
     { timeUnit: "TIME_UNIT_DAY", groupBy: ["description"] },
+    { timeUnit: "TIME_UNIT_NONE", groupBy: [] },
+    { timeUnit: "TIME_UNIT_DAY", groupBy: [] },
   ];
   let lastErr = null;
+  let best = null;
   for (const opt of attempts) {
     try {
       const data = await mgmtFetchJson(settings, path, {
@@ -435,11 +431,13 @@ async function fetchCycleUsageUsd(settings, teamId, cycle) {
           },
         },
       });
-      return sumUsageUsd(data);
+      const sum = sumUsageUsd(data);
+      if (best == null || sum > best) best = sum;
     } catch (e) {
       lastErr = e;
     }
   }
+  if (best != null) return best;
   throw lastErr || new Error("usage API から使用額が取れなかった");
 }
 

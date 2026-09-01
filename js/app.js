@@ -34,7 +34,7 @@ import {
   saveFile,
   saveProject,
 } from "./db.js";
-import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js";
+import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=28";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";

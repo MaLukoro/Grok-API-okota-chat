@@ -1,8 +1,8 @@
-const CACHE = "kotatsu-v27";
+const CACHE = "kotatsu-v28";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=27",
+  "./styles.css?v=28",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -10,11 +10,11 @@ const ASSETS = [
   "./icons/favicon-64.png",
   "./icons/grik.png",
   "./icons/maro.png",
-  "./js/app.js?v=27",
+  "./js/app.js?v=28",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
-  "./js/xai.js",
+  "./js/xai.js?v=28",
   "./js/rag.js",
   "./js/importChat.js",
   "./js/tts.js",
