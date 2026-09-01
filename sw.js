@@ -1,8 +1,8 @@
-const CACHE = "kotatsu-v28";
+const CACHE = "kotatsu-v25";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=28",
+  "./styles.css?v=25",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -10,13 +10,11 @@ const ASSETS = [
   "./icons/favicon-64.png",
   "./icons/grik.png",
   "./icons/maro.png",
-  "./js/app.js?v=28",
+  "./js/app.js?v=25",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
   "./js/xai.js",
-  "./js/gemini.js",
-  "./js/memory.js",
   "./js/rag.js",
   "./js/importChat.js",
   "./js/tts.js",
@@ -42,21 +40,18 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  // Drive / Gemini / Google ログインをキャッシュに入れない。同じオリジンの殻だけ。
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/v1") || url.pathname.startsWith("/mgmt")) {
+  if (
+    url.pathname.startsWith("/v1") ||
+    url.pathname.startsWith("/mgmt") ||
+    url.hostname === "api.x.ai" ||
+    url.hostname === "management-api.x.ai" ||
+    url.hostname.endsWith("supabase.co")
+  ) {
     return;
   }
   const isDoc = req.mode === "navigate" || req.destination === "document";
-  // Google から ?code= / #access_token で戻る文書はキャッシュしない
-  if (isDoc) {
-    event.respondWith(
-      fetch(req, { cache: "reload" }).catch(() => caches.match("./index.html"))
-    );
-    return;
-  }
   event.respondWith(
-    fetch(req)
+    fetch(req, isDoc ? { cache: "reload" } : undefined)
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});

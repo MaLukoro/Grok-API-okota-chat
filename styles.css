@@ -666,8 +666,7 @@ input[type="range"] { accent-color: var(--accent); }
   font-size: 13px;
   margin-bottom: 6px;
 }
-#project-system-prompt,
-#project-memory {
+#project-system-prompt {
   width: 100%;
   min-height: 110px;
   resize: vertical;
@@ -678,53 +677,8 @@ input[type="range"] { accent-color: var(--accent); }
   font-size: 16px;
   line-height: 1.45;
 }
-#project-memory { min-height: 160px; font-family: var(--mono, inherit); }
-#project-prompt-mark,
-#project-memory-mark {
+#project-prompt-mark {
   margin-left: 4px;
-}
-.memory-auto { margin: 8px 0 6px; }
-.memory-actions { margin-top: 4px; flex-wrap: wrap; }
-.session-item.archived { opacity: 0.72; }
-.session-item.archived .title::after {
-  content: " 凍結";
-  color: var(--text-mute);
-  font-size: 11px;
-  font-weight: 500;
-}
-.session-item.living .title::after {
-  content: " 本番";
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 500;
-}
-.archive-banner {
-  margin: 0 10px 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(40, 18, 18, 0.55);
-  color: var(--text-dim);
-  font-size: 13px;
-}
-.carry-banner {
-  margin: 8px 12px 4px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--glass-border);
-  background: rgba(8, 16, 34, 0.5);
-  color: var(--text-dim);
-  font-size: 13px;
-}
-.carry-banner summary { cursor: pointer; }
-.carry-pre {
-  margin: 8px 0 0;
-  max-height: 240px;
-  overflow: auto;
-  white-space: pre-wrap;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-mute);
 }
 .file-drop {
   border: 1px dashed var(--border);

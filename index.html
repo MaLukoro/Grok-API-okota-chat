@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=28" />
+  <link rel="stylesheet" href="./styles.css?v=25" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -75,24 +75,7 @@
             rows="6"
             placeholder="このプロジェクト専用の指示。資料と一緒に毎回乗る"
           ></textarea>
-          <p class="help">会話の既定プロンプトの後ろに足される。空なら乗らない。モデルは触らない。</p>
-        </details>
-        <details class="project-section" id="sec-memory" open>
-          <summary>進行メモリ <span id="project-memory-mark" class="muted sm"></span></summary>
-          <textarea
-            id="project-memory"
-            rows="8"
-            placeholder="場所:&#10;時刻:&#10;服装:&#10;身体・接触:&#10;感情・温度:&#10;未解決（約束・仕掛り）:&#10;今ターンで変えた事実:&#10;固有名詞:"
-          ></textarea>
-          <p class="help">今夜の進行。折りたたみ＋手直し。セリフの生ログはここに置かない。打ってる最中は自動上書きしない。</p>
-          <label class="check memory-auto">
-            <input id="chk-auto-compress" type="checkbox" />
-            <span>窓が溢れたら自動で折る</span>
-          </label>
-          <div class="row-btns memory-actions">
-            <button id="btn-fold-memory" class="btn ghost sm" type="button" title="今のログの古い分をメモリに溶かす">今のログから作る</button>
-            <button id="btn-freeze" class="btn primary sm" type="button" title="このスレッドを凍結して続きを開く">凍結して続き</button>
-          </div>
+          <p class="help">会話の既定プロンプトの後ろに足される。空なら乗らない。</p>
         </details>
         <details class="project-section" id="sec-threads" open>
           <summary>スレッド</summary>
@@ -152,7 +135,6 @@
       </div>
 
       <footer class="composer-wrap">
-        <div id="archive-banner" class="archive-banner" hidden>このスレッドは凍結済み（読み専用）。続きは新しいスレッドへ。</div>
         <div id="rag-source-bar" class="rag-source-bar" hidden>
           <button id="btn-rag-sources" class="btn ghost sm btn-rag-sources" type="button" title="この送信で参照するプロジェクト資料を選ぶ">📁 参照</button>
           <span id="rag-source-summary" class="rag-source-summary"></span>
@@ -294,30 +276,6 @@
       </div>
 
       <div class="panel">
-        <div class="panel-title">進行メモリ / 圧縮</div>
-        <label class="field">
-          <span>Gemini APIキー（圧縮用）</span>
-          <input id="inp-geminikey" type="password" autocomplete="off" placeholder="AI Studio のキー" />
-        </label>
-        <label class="field">
-          <span>圧縮エンジン</span>
-          <select id="sel-compress">
-            <option value="gemini">Gemini 2.5 Flash-Lite（無料枠）</option>
-            <option value="xai">xAI non-reasoning</option>
-          </select>
-        </label>
-        <label class="check">
-          <input id="chk-auto-compress-settings" type="checkbox" />
-          <span>自動圧縮（オフなら凍結時だけ溶かす）</span>
-        </label>
-        <div class="row-btns">
-          <button id="btn-save-gemini" class="btn primary sm" type="button">圧縮設定を保存</button>
-        </div>
-        <div id="gemini-hint" class="muted sm"></div>
-        <p class="help">本体の返答は今の Grok。圧縮だけ別。Gemini が検閲したら non-reasoning に切り替わる。無料枠は学習に使われる。</p>
-      </div>
-
-      <div class="panel">
         <div class="panel-title">RAG</div>
         <label class="field range">
           <span>参照チャンク数 <b id="val-ragk">5</b></span>
@@ -348,7 +306,7 @@
 
       <div class="panel">
         <div class="panel-title">Google ドライブ</div>
-        <p class="help">会話の作業場は端末。ドライブはコピー先。⬆ すると xAIキー・Geminiキー・Management Key・プロキシも一緒に乗る。チャットに貼った画像の中身（base64）は乗せない。別端末は Google ログインして ⬇。</p>
+        <p class="help">会話の作業場は端末。ドライブはコピー先。⬆ すると APIキー・Management Key・プロキシも一緒に乗る。チャットに貼った画像の中身（base64）は乗せない。別端末は Google ログインして ⬇。</p>
         <label class="field">
           <span>OAuth クライアントID</span>
           <input id="inp-gclient" type="text" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com" />
@@ -406,7 +364,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=28"></script>
+  <script type="module" src="./js/app.js?v=25"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -416,7 +374,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=28").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=25").catch(() => {});
       });
     }
   </script>

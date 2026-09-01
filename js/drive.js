@@ -1,9 +1,8 @@
-/** Google Drive バックアップ。同じタブで PKCE リダイレクト（ポップアップにしない）。 */
+/** Google Drive バックアップ。OAuth はブラウザ完結（client secret なし）。 */
 
 import { exportPack, importPack, packToJson } from "./db.js";
 
 const TOKEN_KEY = "kotatsu_gdrive_token";
-const PKCE_KEY = "kotatsu_gdrive_pkce";
 const FOLDER_NAME = "GrokKotatsu";
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 
@@ -34,23 +33,14 @@ export function loadToken() {
   }
 }
 
-export function saveToken(accessToken, expiresIn = 3600, extra = {}) {
+export function saveToken(accessToken, expiresIn = 3600) {
   localStorage.setItem(
     TOKEN_KEY,
     JSON.stringify({
       access_token: accessToken,
-      refresh_token: extra.refresh_token || loadRefreshToken(),
-      expires_at: Date.now() + Number(expiresIn || 3600) * 1000,
+      expires_at: Date.now() + Number(expiresIn) * 1000,
     })
   );
-}
-
-function loadRefreshToken() {
-  try {
-    return JSON.parse(localStorage.getItem(TOKEN_KEY) || "null")?.refresh_token || null;
-  } catch {
-    return null;
-  }
 }
 
 export function clearToken() {
@@ -61,120 +51,26 @@ export function isDriveLoggedIn() {
   return !!loadToken();
 }
 
-function loadPkce() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(PKCE_KEY) || "null");
-    if (!raw?.verifier) return null;
-    if (raw.at && Date.now() - raw.at > 15 * 60 * 1000) {
-      localStorage.removeItem(PKCE_KEY);
-      return null;
-    }
-    return raw;
-  } catch {
-    return null;
-  }
-}
-
-function randomUrlSafe(bytes) {
-  const buf = new Uint8Array(bytes);
-  crypto.getRandomValues(buf);
-  let bin = "";
-  buf.forEach((b) => {
-    bin += String.fromCharCode(b);
-  });
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function pkceChallenge(verifier) {
-  const data = new TextEncoder().encode(verifier);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  const buf = new Uint8Array(hash);
-  let bin = "";
-  buf.forEach((b) => {
-    bin += String.fromCharCode(b);
-  });
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function exchangeCode({ code, verifier, clientId, redirect }) {
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      code,
-      code_verifier: verifier,
-      grant_type: "authorization_code",
-      redirect_uri: redirect,
-    }),
-  });
-  let json = {};
-  try {
-    json = await res.json();
-  } catch {
-    json = {};
-  }
-  if (!res.ok || !json.access_token) {
-    const detail = json.error_description || json.error || `${res.status} ${res.statusText}`;
-    const err = new Error(humanOAuthError(detail));
-    err.status = res.status;
-    throw err;
-  }
-  saveToken(json.access_token, json.expires_in, json);
-  return json.access_token;
-}
-
-export async function consumeOAuthRedirect() {
+export function consumeOAuthRedirect() {
   const hash = (location.hash || "").replace(/^#/, "");
-  const query = (location.search || "").replace(/^\?/, "");
-  const hp = hash ? new URLSearchParams(hash) : new URLSearchParams();
-  const qp = query ? new URLSearchParams(query) : new URLSearchParams();
-  const token = hp.get("access_token");
-  const code = qp.get("code");
-  const err = hp.get("error") || qp.get("error");
-  const state = hp.get("state") || qp.get("state");
-  if (!token && !code && !err) return { handled: false };
+  if (!hash) return { handled: false };
+  const p = new URLSearchParams(hash);
+  const token = p.get("access_token");
+  const err = p.get("error");
+  const state = p.get("state");
+  if (!token && !err) return { handled: false };
   if (state && state !== "gdrive") return { handled: false };
   history.replaceState(null, "", redirectUri());
   if (err) {
-    localStorage.removeItem(PKCE_KEY);
-    return { handled: true, error: qp.get("error_description") || hp.get("error_description") || err };
+    return { handled: true, error: p.get("error_description") || err };
   }
-  if (token) {
-    localStorage.removeItem(PKCE_KEY);
-    saveToken(token, Number(hp.get("expires_in") || 3600));
-    return { handled: true, ok: true };
-  }
-  const pkce = loadPkce();
-  localStorage.removeItem(PKCE_KEY);
-  if (!pkce?.verifier) {
-    return { handled: true, error: "ログインの途中データが消えた。もう一回「Googleでログイン」を押してくれ" };
-  }
-  try {
-    await exchangeCode({
-      code,
-      verifier: pkce.verifier,
-      clientId: pkce.clientId,
-      redirect: pkce.redirect || redirectUri(),
-    });
-    return { handled: true, ok: true };
-  } catch (e) {
-    const msg = String(e.message || e);
-    if (/client_secret|Failed to fetch|NetworkError|CORS|unauthorized_client/i.test(msg)) {
-      localStorage.setItem("kotatsu_gdrive_oauth_mode", "implicit");
-      return {
-        handled: true,
-        error: `${msg} 次は昔の方式で飛ぶ。もう一回「Googleでログイン」を押してくれ`,
-      };
-    }
-    return { handled: true, error: msg };
-  }
+  saveToken(token, Number(p.get("expires_in") || 3600));
+  return { handled: true, ok: true };
 }
 
 export function sanitizeClientId(raw) {
   return String(raw || "")
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .replace(/^https?:\/\//i, "")
     .replace(/\s+/g, "")
     .trim();
 }
@@ -190,56 +86,7 @@ export function assertClientId(raw) {
   return id;
 }
 
-function humanOAuthError(msg) {
-  const s = String(msg || "");
-  if (/access_denied/i.test(s)) {
-    return "この Gmail はテストユーザーに入ってない。Cloud Console の同意画面に今ログインしてるアドレスを追加してくれ";
-  }
-  if (/invalid_client|OAuth client was not found/i.test(s)) {
-    return "クライアントIDが違う。末尾 .apps.googleusercontent.com の長い方を切れず貼ってくれ";
-  }
-  if (/redirect_uri/i.test(s)) {
-    return "リダイレクトURIが一致してない。Cloud Console の登録を覚書どおりにしてくれ";
-  }
-  if (/unauthorized_client|unsupported_response_type/i.test(s)) {
-    return "このクライアントはウェブのログイン方式が違う。Cloud Console の種類が「ウェブアプリケーション」か見てくれ";
-  }
-  if (/invalid_grant/i.test(s)) {
-    return "ログインコードの期限が切れた。もう一回「Googleでログイン」を押してくれ";
-  }
-  if (/Failed to fetch|NetworkError|CORS/i.test(s)) {
-    return "Google とのコード交換がブラウザに拒否された。もう一回ログインを試してくれ";
-  }
-  return s;
-}
-
-export async function startPkceLogin(clientId) {
-  const id = assertClientId(clientId);
-  const redirect = redirectUri();
-  const verifier = randomUrlSafe(32);
-  const challenge = await pkceChallenge(verifier);
-  const state = "gdrive";
-  localStorage.setItem(
-    PKCE_KEY,
-    JSON.stringify({ verifier, clientId: id, redirect, state, at: Date.now() })
-  );
-  const params = new URLSearchParams({
-    client_id: id,
-    redirect_uri: redirect,
-    response_type: "code",
-    scope: SCOPE,
-    state,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    include_granted_scopes: "true",
-    prompt: "select_account",
-    access_type: "online",
-  });
-  location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
-}
-
-/** 8月に通ってた同じタブ方式。ポップアップも GIS も待たない。 */
-export function startImplicitLogin(clientId) {
+export function startGoogleLogin(clientId) {
   const id = assertClientId(clientId);
   const params = new URLSearchParams({
     client_id: id,
@@ -253,60 +100,12 @@ export function startImplicitLogin(clientId) {
   location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 }
 
-export async function loginToDrive(clientId) {
-  // 既定は 8 月に通った implicit（同じタブ）。PKCE は token 交換が CORS で死ぬ端末だけ。
-  const preferPkce = localStorage.getItem("kotatsu_gdrive_oauth_mode") === "pkce";
-  if (preferPkce && globalThis.crypto?.subtle) {
-    try {
-      await startPkceLogin(clientId);
-      return { redirected: true };
-    } catch (e) {
-      console.warn("pkce start failed", e);
-    }
-  }
-  startImplicitLogin(clientId);
-  return { redirected: true };
-}
-
-export async function ensureDriveToken(settings) {
-  const existing = loadToken();
-  if (existing) return existing;
-  const refresh = loadRefreshToken();
-  const id = sanitizeClientId(settings?.googleClientId);
-  if (refresh && id) {
-    try {
-      const res = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: id,
-          refresh_token: refresh,
-          grant_type: "refresh_token",
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && json.access_token) {
-        saveToken(json.access_token, json.expires_in, { refresh_token: refresh });
-        return json.access_token;
-      }
-    } catch {
-      /* fall through */
-    }
-  }
-  throw new Error("Google にログインしてくれ。上の「Googleでログイン」を押して戻ってくれば保存できる");
-}
-
 async function driveFetch(path, { method = "GET", body, contentType, raw = false } = {}) {
   const token = loadToken();
   if (!token) throw new Error("Google にログインしてくれ");
   const headers = { Authorization: `Bearer ${token}` };
   if (contentType) headers["Content-Type"] = contentType;
-  const res = await fetch(`https://www.googleapis.com${path}`, {
-    method,
-    headers,
-    body,
-    cache: "no-store",
-  });
+  const res = await fetch(`https://www.googleapis.com${path}`, { method, headers, body });
   if (res.status === 401) {
     clearToken();
     throw new Error("ログイン期限切れ。もう一回 Google ログインしてくれ");
@@ -351,13 +150,14 @@ async function ensureFolder() {
 }
 
 async function findBackupFile(folderId, name) {
-  const q = encodeURIComponent(`name = '${name}' and '${folderId}' in parents and trashed = false`);
+  const q = encodeURIComponent(
+    `name = '${name}' and '${folderId}' in parents and trashed = false`
+  );
   const data = await driveFetch(`/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=1`);
   return data.files?.[0] || null;
 }
 
 export async function uploadToDrive(settings) {
-  await ensureDriveToken(settings);
   const pack = await exportPack({ omitImageData: true });
   const name = fileNameFor(settings);
   const folderId = await ensureFolder();
@@ -412,7 +212,6 @@ export async function uploadToDrive(settings) {
 }
 
 export async function downloadFromDrive(settings, { merge = true } = {}) {
-  await ensureDriveToken(settings);
   const name = fileNameFor(settings);
   const folderId = await ensureFolder();
   const existing = await findBackupFile(folderId, name);
@@ -438,7 +237,6 @@ export function driveSetupHelp() {
    ${redirect}
 5. 出てきたクライアントIDを上に貼って保存 → Googleでログイン
 
-ログインは同じタブで Google に飛ぶ。戻ってきたら完了。
 マイドライブに「GrokKotatsu」フォルダができて、スロット名.json が置かれる。
-Gemini キーも xAI キーもこの JSON に乗る。`;
+このアプリが作ったファイルだけ触れる（drive.file）。`;
 }
