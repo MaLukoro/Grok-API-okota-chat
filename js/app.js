@@ -247,7 +247,10 @@ function renderCreditUi() {
         : snap.usedSource === "invoice"
           ? " · 使用=invoice"
           : "";
-    statusEl.textContent = `最終 ${new Date(snap.fetchedAt).toLocaleString("ja-JP")}${src}${s.mgmtKey ? ` · ${maskKey(s.mgmtKey)}` : ""}`;
+    const cy = snap.billingCycle;
+    const cycle =
+      cy?.year && cy?.month ? ` · ${cy.year}-${String(cy.month).padStart(2, "0")}` : "";
+    statusEl.textContent = `最終 ${new Date(snap.fetchedAt).toLocaleString("ja-JP")}${src}${cycle}${s.mgmtKey ? ` · ${maskKey(s.mgmtKey)}` : ""}`;
   } else {
     statusEl.textContent = "まだ取ってない。下の「残量を更新」";
   }

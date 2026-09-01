@@ -327,20 +327,21 @@ export function formatUsd(n) {
   });
 }
 
-/** invoice.billingCycle が無ければ UTC の今月。年が明らかにズレてても今月へ。 */
+/**
+ * usage 集計の年月。
+ * invoice.billingCycle.year が壁時計とズレることがある（実測: 2026-09 なのに 2025-09）。
+ * 年が今と一致するときだけ invoice の月を信じ、それ以外は UTC 今月。
+ */
 export function resolveBillingCycle(cycle) {
   const now = new Date();
   const nowY = now.getUTCFullYear();
   const nowM = now.getUTCMonth() + 1;
-  let year = Number(cycle?.year);
-  let month = Number(cycle?.month);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-    return { year: nowY, month: nowM };
+  const year = Number(cycle?.year);
+  const month = Number(cycle?.month);
+  if (year === nowY && Number.isInteger(month) && month >= 1 && month <= 12) {
+    return { year, month };
   }
-  if (Math.abs(year - nowY) > 1) {
-    return { year: nowY, month: nowM };
-  }
-  return { year, month };
+  return { year: nowY, month: nowM };
 }
 
 function cycleTimeRange({ year, month }) {
