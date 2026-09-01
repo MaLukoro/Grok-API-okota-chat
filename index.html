@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=29" />
+  <link rel="stylesheet" href="./styles.css?v=30" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -68,6 +68,7 @@
           </div>
         </div>
         <button id="btn-new-thread" class="btn ghost sm ws-new-thread" type="button">＋ スレッド</button>
+        <button id="btn-freeze-continue" class="btn ghost sm ws-freeze" type="button">ここで凍結して続き</button>
         <details class="project-section" id="sec-prompt" open>
           <summary>シスプロ <span id="project-prompt-mark" class="muted sm"></span></summary>
           <textarea
@@ -75,7 +76,19 @@
             rows="6"
             placeholder="このプロジェクト専用の指示。資料と一緒に毎回乗る"
           ></textarea>
-          <p class="help">会話の既定プロンプトの後ろに足される。空なら乗らない。</p>
+          <p class="help">会話の既定プロンプトの後ろに足される。空なら乗らない。モデルは触らない。</p>
+        </details>
+        <details class="project-section" id="sec-memory" open>
+          <summary>進行メモリ <span id="project-memory-mark" class="muted sm"></span></summary>
+          <textarea
+            id="project-progress-memory"
+            rows="8"
+            placeholder="場所:&#10;時刻:&#10;服装:&#10;身体・接触:&#10;感情・温度:&#10;未解決（約束・仕掛り）:&#10;今ターンで変えた事実:&#10;固有名詞:"
+          ></textarea>
+          <p class="help">今夜の進行。毎回APIに乗る。いつでも直せる。打ってる最中は自動上書きしない。</p>
+          <div class="row-btns">
+            <button id="btn-memory-bootstrap" class="btn ghost sm" type="button">今のログから作る</button>
+          </div>
         </details>
         <details class="project-section" id="sec-threads" open>
           <summary>スレッド</summary>
@@ -135,6 +148,7 @@
       </div>
 
       <footer class="composer-wrap">
+        <div id="archive-banner" class="archive-banner" hidden>このスレッドは凍結済み。送信できない。続きは新しいスレッドへ。</div>
         <div id="rag-source-bar" class="rag-source-bar" hidden>
           <button id="btn-rag-sources" class="btn ghost sm btn-rag-sources" type="button" title="この送信で参照するプロジェクト資料を選ぶ">📁 参照</button>
           <span id="rag-source-summary" class="rag-source-summary"></span>
@@ -165,6 +179,7 @@
         </div>
         <div class="composer-meta">
           <span id="gen-hint"></span>
+          <span id="memory-hint" class="memory-hint" hidden></span>
           <span id="rag-hint" class="rag-hint" hidden></span>
           <button type="button" id="credit-chip" class="credit-chip" hidden title="クレジット残量（ライブ推定）。タップで設定へ">残 —</button>
         </div>
@@ -276,6 +291,30 @@
       </div>
 
       <div class="panel">
+        <div class="panel-title">進行メモリ / 圧縮</div>
+        <label class="field">
+          <span>Gemini APIキー（圧縮用・任意）</span>
+          <input id="inp-geminikey" type="password" autocomplete="off" placeholder="AIza..." />
+        </label>
+        <div class="row-btns">
+          <button id="btn-save-gemini" class="btn ghost sm" type="button">保存</button>
+        </div>
+        <div id="gemini-hint" class="muted sm"></div>
+        <label class="field">
+          <span>圧縮エンジン</span>
+          <select id="sel-compress-engine">
+            <option value="gemini">Gemini Flash-Lite（先）</option>
+            <option value="grok">Grok non-reasoning</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="chk-auto-compress" type="checkbox" />
+          <span>自動圧縮する（オフなら凍結したときだけ溶かす）</span>
+        </label>
+        <p class="help">本体の返答は今どおり Grok。圧縮は窓から落ちた一塊だけ。Geminiキーが空、または検閲されたら Grok に落とす。Worker を使ってるなら worker.js を最新に貼ると Gemini 中継も通る。</p>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">RAG</div>
         <label class="field range">
           <span>参照チャンク数 <b id="val-ragk">5</b></span>
@@ -364,7 +403,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=29"></script>
+  <script type="module" src="./js/app.js?v=30"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -374,7 +413,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=29").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=30").catch(() => {});
       });
     }
   </script>

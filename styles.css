@@ -659,6 +659,18 @@ input[type="range"] { accent-color: var(--accent); }
 .ws-head-actions { display: flex; gap: 6px; align-items: center; }
 .ws-name { font-weight: 600; }
 .ws-new-thread { width: 100%; margin-bottom: 8px; }
+.ws-freeze { width: 100%; margin-bottom: 8px; }
+.thread-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-right: 4px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.thread-badge.live { border-color: var(--accent); color: var(--accent); }
+.thread-badge.archived { opacity: 0.75; }
 .project-section { margin-top: 8px; }
 .project-section summary {
   cursor: pointer;
@@ -666,7 +678,8 @@ input[type="range"] { accent-color: var(--accent); }
   font-size: 13px;
   margin-bottom: 6px;
 }
-#project-system-prompt {
+#project-system-prompt,
+#project-progress-memory {
   width: 100%;
   min-height: 110px;
   resize: vertical;
@@ -677,6 +690,7 @@ input[type="range"] { accent-color: var(--accent); }
   font-size: 16px;
   line-height: 1.45;
 }
+#project-progress-memory { min-height: 160px; }
 #project-prompt-mark {
   margin-left: 4px;
 }
@@ -869,6 +883,35 @@ input[type="range"] { accent-color: var(--accent); }
 
 /* 下の safe-area は #app の padding-bottom が担当。ここでも足すと iOS で入力欄が浮く */
 .composer-wrap { padding: 8px 12px 6px; }
+.archive-banner {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(80, 24, 24, 0.35);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.handoff-box {
+  margin: 0 4px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: rgba(8, 16, 34, 0.45);
+}
+.handoff-box summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.handoff-turn {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.handoff-who { color: var(--text-mute); font-size: 11px; }
+.memory-hint { color: var(--text-mute); font-size: 11px; }
 .composer {
   display: flex;
   flex-direction: column;

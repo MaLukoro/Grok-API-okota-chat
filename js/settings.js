@@ -44,6 +44,10 @@ const DEFAULTS = {
   googleClientId: "",
   googleAutoBackup: false,
   googleLastBackup: "",
+  geminiApiKey: "",
+  geminiCompressModel: "",
+  compressEngine: "gemini",
+  autoCompress: true,
 };
 
 export function loadSettings() {
@@ -84,9 +88,21 @@ const SYNC_SETTING_KEYS = [
   "backupSlot",
   "googleClientId",
   "googleAutoBackup",
+  "geminiApiKey",
+  "geminiCompressModel",
+  "compressEngine",
+  "autoCompress",
 ];
 
-const KEEP_IF_EMPTY = new Set(["apiKey", "mgmtKey", "proxyBase", "googleClientId", "supabaseKey", "supabaseUrl"]);
+const KEEP_IF_EMPTY = new Set([
+  "apiKey",
+  "mgmtKey",
+  "proxyBase",
+  "googleClientId",
+  "supabaseKey",
+  "supabaseUrl",
+  "geminiApiKey",
+]);
 
 export function exportSettings() {
   const s = loadSettings();

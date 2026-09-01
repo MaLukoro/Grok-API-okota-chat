@@ -1,4 +1,27 @@
-/** Gemini generateContent。ブラウザ直。圧縮専用。 */
+/** Gemini 圧縮クライアント。本体の Grok とは別。失敗したら呼び出し側が Grok に落とす。 */
+
+function hostHasLocalProxy() {
+  const h = location.hostname || "";
+  if (h === "localhost" || h === "127.0.0.1") return true;
+  if (h.endsWith(".pages.dev") || h.endsWith(".workers.dev")) return true;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(h)) return true;
+  return false;
+}
+
+export const GEMINI_COMPRESS_MODELS = [
+  "gemini-2.5-flash-lite",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-2.0-flash-lite",
+];
+
+const SAFETY = [
+  "HARM_CATEGORY_HARASSMENT",
+  "HARM_CATEGORY_HATE_SPEECH",
+  "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+  "HARM_CATEGORY_DANGEROUS_CONTENT",
+  "HARM_CATEGORY_CIVIC_INTEGRITY",
+].map((category) => ({ category, threshold: "BLOCK_NONE" }));
 
 export function sanitizeGeminiKey(raw) {
   return String(raw || "")
@@ -7,47 +30,47 @@ export function sanitizeGeminiKey(raw) {
     .trim();
 }
 
-const SAFETY_NONE = [
-  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-];
-
-const REFUSAL_RE =
-  /i\s*(can('t|not)|won'?t)\s+(help|assist|provide)|against (google'?s )?(policies|guidelines)|community guidelines|お手伝いできません|対応できません|生成できません|リクエストに(は)?お応えできません|安全上の理由|コンテンツポリシー/i;
-
-function candidateText(json) {
-  const parts = json?.candidates?.[0]?.content?.parts;
-  if (!Array.isArray(parts)) return "";
-  return parts
-    .map((p) => (typeof p?.text === "string" ? p.text : ""))
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+export function isGeminiSafetyError(err) {
+  if (!err) return false;
+  if (err.code === "SAFETY") return true;
+  const m = String(err.message || err);
+  return /blocked|SAFETY|PROHIBITED|BLOCKLIST|finishReason/i.test(m);
 }
 
-function finishReason(json) {
-  return String(json?.candidates?.[0]?.finishReason || json?.promptFeedback?.blockReason || "");
+function geminiProxyBase(settings) {
+  const custom = (settings?.proxyBase || "").trim().replace(/\/+$/, "");
+  if (custom) {
+    if (custom.endsWith("/v1")) return `${custom.slice(0, -3)}/gemini`;
+    return `${custom}/gemini`;
+  }
+  if (hostHasLocalProxy()) return `${location.origin}/gemini`;
+  return "";
 }
 
-export function isGeminiCensored(json, text) {
+function extractText(json) {
   const block = json?.promptFeedback?.blockReason;
-  if (block && block !== "BLOCK_REASON_UNSPECIFIED") return true;
-  const fr = finishReason(json).toUpperCase();
-  if (fr && ["SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "OTHER"].includes(fr)) return true;
-  if (!json?.candidates?.length) return true;
-  const t = String(text || "").trim();
-  if (!t) return true;
-  if (REFUSAL_RE.test(t) && t.length < 800) return true;
-  return false;
+  if (block && block !== "BLOCK_REASON_UNSPECIFIED" && block !== "NONE") {
+    const err = new Error(`Gemini blocked: ${block}`);
+    err.code = "SAFETY";
+    throw err;
+  }
+  const c = json?.candidates?.[0];
+  const fr = c?.finishReason;
+  if (fr === "SAFETY" || fr === "PROHIBITED_CONTENT" || fr === "BLOCKLIST" || fr === "SPII") {
+    const err = new Error(`Gemini blocked: ${fr}`);
+    err.code = "SAFETY";
+    throw err;
+  }
+  const parts = c?.content?.parts || [];
+  const text = parts.map((p) => (typeof p?.text === "string" ? p.text : "")).join("");
+  return text.trim();
 }
 
-async function readGeminiError(res) {
+async function readError(res) {
   let detail = `${res.status} ${res.statusText}`;
   try {
     const j = await res.json();
-    detail = j.error?.message || j.error?.status || JSON.stringify(j);
+    detail = j.error?.message || j.message || JSON.stringify(j);
   } catch {
     try {
       detail = await res.text();
@@ -55,71 +78,84 @@ async function readGeminiError(res) {
       /* ignore */
     }
   }
-  return typeof detail === "string" ? detail : JSON.stringify(detail);
+  const err = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  err.status = res.status;
+  if (/safety|blocked|prohibited/i.test(String(detail))) err.code = "SAFETY";
+  return err;
 }
 
-function buildBody(prompt, systemInstruction, { thinking = true } = {}) {
-  const generationConfig = {
-    temperature: 0.2,
-    maxOutputTokens: 2048,
-  };
-  if (thinking) generationConfig.thinkingConfig = { thinkingBudget: 0 };
-  const body = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig,
-    safetySettings: SAFETY_NONE,
-  };
-  if (systemInstruction) {
-    body.systemInstruction = { parts: [{ text: systemInstruction }] };
-  }
-  return body;
-}
-
-async function postGenerate(key, model, body, signal) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model
-  )}:generateContent?key=${encodeURIComponent(key)}`;
+async function postGenerate(url, key, body) {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": key,
+    },
     body: JSON.stringify(body),
-    signal,
   });
-  if (!res.ok) {
-    const err = new Error(await readGeminiError(res));
-    err.status = res.status;
-    throw err;
-  }
+  if (!res.ok) throw await readError(res);
   return res.json();
 }
 
-const LITE_FALLBACKS = ["gemini-2.5-flash-lite", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+function modelUrls(settings, model, key) {
+  const q = `key=${encodeURIComponent(key)}`;
+  const path = `/v1beta/models/${encodeURIComponent(model)}:generateContent?${q}`;
+  const urls = [`https://generativelanguage.googleapis.com${path}`];
+  const proxy = geminiProxyBase(settings);
+  if (proxy) urls.push(`${proxy}${path}`);
+  return urls;
+}
 
-export async function geminiGenerate(apiKey, { model, prompt, systemInstruction, signal } = {}) {
-  const key = sanitizeGeminiKey(apiKey);
-  if (!key) throw new Error("Gemini APIキーが未設定だよ。⚙ の進行メモリ欄へ。");
-  const tried = [];
-  const queue = [model, ...LITE_FALLBACKS].filter((id, i, arr) => id && arr.indexOf(id) === i);
+export async function geminiGenerateText(settings, prompt, { models } = {}) {
+  const key = sanitizeGeminiKey(settings?.geminiApiKey);
+  if (!key) {
+    const err = new Error("Geminiキー未設定");
+    err.code = "NO_KEY";
+    throw err;
+  }
+  const preferred = settings?.geminiCompressModel;
+  const list = [];
+  if (preferred) list.push(preferred);
+  for (const id of models || GEMINI_COMPRESS_MODELS) {
+    if (!list.includes(id)) list.push(id);
+  }
+
+  const payload = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 2048,
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+    safetySettings: SAFETY,
+  };
+  const payloadNoThink = {
+    ...payload,
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+  };
 
   let lastErr = null;
-  for (const id of queue) {
-    tried.push(id);
-    for (const thinking of [true, false]) {
-      try {
-        const json = await postGenerate(key, id, buildBody(prompt, systemInstruction, { thinking }), signal);
-        const text = candidateText(json);
-        return { text, json, model: id, censored: isGeminiCensored(json, text) };
-      } catch (e) {
-        lastErr = e;
-        const msg = String(e.message || e);
-        const status = e.status;
-        const retryable404 = status === 404 || /not found|NOT_FOUND/i.test(msg);
-        const retryThinking = thinking && (status === 400 || /thinkingConfig|unknown name|invalid/i.test(msg));
-        if (retryThinking) continue;
-        if (retryable404) break;
-        throw e;
+  for (const model of list) {
+    const urls = modelUrls(settings, model, key);
+    for (const url of urls) {
+      for (const body of [payload, payloadNoThink]) {
+        try {
+          const json = await postGenerate(url, key, body);
+          const text = extractText(json);
+          if (!text) {
+            lastErr = new Error("Geminiの出力が空");
+            continue;
+          }
+          return { text, model };
+        } catch (e) {
+          lastErr = e;
+          if (e.status === 404 || /not found|NOT_FOUND/i.test(String(e.message || ""))) break;
+          if (e.code === "SAFETY") throw e;
+          if (/thinkingConfig|Unknown name/i.test(String(e.message || ""))) continue;
+          break;
+        }
       }
     }
   }
-  throw lastErr || new Error(`Gemini モデルが見つからない: ${tried.join(", ")}`);
+  throw lastErr || new Error("Gemini圧縮に失敗");
 }

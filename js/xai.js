@@ -240,6 +240,33 @@ export async function chatStream(settings, body, opts) {
   return chatCompletionsStream(settings, body, opts);
 }
 
+/** 圧縮用。ストリームしない。失敗したら投げて、呼び出し側はリトライしない。 */
+export async function chatComplete(settings, body, { signal } = {}) {
+  const url = `${resolveApiBase(settings)}/chat/completions`;
+  const payload = {
+    model: body.model,
+    messages: body.messages,
+    temperature: body.temperature ?? 0.2,
+    top_p: body.topP ?? 0.95,
+    max_tokens: body.maxTokens ?? 2048,
+    stream: false,
+  };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: authHeaders(settings),
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const json = await res.json();
+  const content = json.choices?.[0]?.message?.content || "";
+  return {
+    content: typeof content === "string" ? content : "",
+    model: json.model || body.model,
+    usage: json.usage || null,
+  };
+}
+
 export async function ttsSpeak(settings, { text, voiceId, language }) {
   const url = `${resolveApiBase(settings)}/tts`;
   const res = await fetch(url, {

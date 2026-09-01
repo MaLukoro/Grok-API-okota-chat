@@ -37,10 +37,14 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_OPTIONS(self) -> None:
-        if self.path.startswith("/v1") or self.path.startswith("/mgmt"):
+        if (
+            self.path.startswith("/v1")
+            or self.path.startswith("/mgmt")
+            or self.path.startswith("/gemini")
+        ):
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Authorization,Content-Type,x-goog-api-key")
             self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
             self.end_headers()
             return
@@ -53,6 +57,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.startswith("/mgmt"):
             self._proxy("management-api.x.ai", strip_prefix="/mgmt")
             return
+        if self.path.startswith("/gemini"):
+            self._proxy("generativelanguage.googleapis.com", strip_prefix="/gemini")
+            return
         super().do_GET()
 
     def do_POST(self) -> None:
@@ -62,13 +69,16 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.startswith("/mgmt"):
             self._proxy("management-api.x.ai", strip_prefix="/mgmt")
             return
+        if self.path.startswith("/gemini"):
+            self._proxy("generativelanguage.googleapis.com", strip_prefix="/gemini")
+            return
         self.send_error(404)
 
     def _proxy(self, host: str, strip_prefix: str = "") -> None:
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
         headers = {}
-        for key in ("Authorization", "Content-Type", "Accept"):
+        for key in ("Authorization", "Content-Type", "Accept", "x-goog-api-key"):
             val = self.headers.get(key)
             if val:
                 headers[key] = val

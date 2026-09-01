@@ -15,10 +15,13 @@ export default {
     if (url.pathname.startsWith("/mgmt")) {
       const rest = url.pathname.slice("/mgmt".length) || "/";
       target = "https://management-api.x.ai" + rest + url.search;
+    } else if (url.pathname.startsWith("/gemini")) {
+      const rest = url.pathname.slice("/gemini".length) || "/";
+      target = "https://generativelanguage.googleapis.com" + rest + url.search;
     } else if (url.pathname.startsWith("/v1")) {
       target = "https://api.x.ai" + url.pathname + url.search;
     } else {
-      return new Response("Grok Kotatsu proxy. Use /v1/* or /mgmt/*", {
+      return new Response("Grok Kotatsu proxy. Use /v1/* or /mgmt/* or /gemini/*", {
         status: 404,
         headers: cors(req),
       });
@@ -43,6 +46,6 @@ function cors(req) {
   return new Headers({
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization,Content-Type",
+    "Access-Control-Allow-Headers": "Authorization,Content-Type,x-goog-api-key",
   });
 }

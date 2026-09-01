@@ -1,8 +1,8 @@
-const CACHE = "kotatsu-v29";
+const CACHE = "kotatsu-v30";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=29",
+  "./styles.css?v=30",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -10,16 +10,18 @@ const ASSETS = [
   "./icons/favicon-64.png",
   "./icons/grik.png",
   "./icons/maro.png",
-  "./js/app.js?v=29",
+  "./js/app.js?v=30",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
-  "./js/xai.js?v=29",
+  "./js/xai.js?v=30",
   "./js/rag.js",
   "./js/importChat.js",
   "./js/tts.js",
   "./js/cloud.js",
   "./js/drive.js",
+  "./js/memory.js?v=30",
+  "./js/gemini.js?v=30",
 ];
 
 self.addEventListener("install", (event) => {
@@ -43,8 +45,10 @@ self.addEventListener("fetch", (event) => {
   if (
     url.pathname.startsWith("/v1") ||
     url.pathname.startsWith("/mgmt") ||
+    url.pathname.startsWith("/gemini") ||
     url.hostname === "api.x.ai" ||
     url.hostname === "management-api.x.ai" ||
+    url.hostname === "generativelanguage.googleapis.com" ||
     url.hostname.endsWith("supabase.co")
   ) {
     return;

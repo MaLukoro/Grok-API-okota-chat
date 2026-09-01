@@ -72,6 +72,7 @@ export function emptyChat({
     created_at: t,
     updated_at: t,
     pinned: false,
+    archived: false,
     version: 1,
   };
 }
@@ -83,6 +84,9 @@ export function emptyProject({ name = "新しいプロジェクト", description
     name,
     description,
     system_prompt,
+    progress_memory: "",
+    live_thread_id: null,
+    handoff: null,
     created_at: t,
     updated_at: t,
   };

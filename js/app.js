@@ -34,8 +34,34 @@ import {
   saveFile,
   saveProject,
 } from "./db.js";
-import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=29";
+import { chatComplete, chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=30";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
+import {
+  CHUNK_CHARS,
+  HANDOFF_CHUNK,
+  MEMORY_CAP,
+  OVERFLOW_MIN,
+  WINDOW_CHARS,
+  buildCompressPrompt,
+  capMemory,
+  chunkOverflow,
+  cloneHandoffMessages,
+  collectRawItems,
+  formatChunk,
+  canWriteMemory,
+  isLiveThread,
+  looksLikeForm,
+  looksLikeRefusal,
+  markFolded,
+  overflowChars,
+  pruneHandoff,
+  remainingHandoff,
+  selectApiMessages,
+  splitWindow,
+  stripFences,
+  windowStats,
+} from "./memory.js?v=30";
+import { geminiGenerateText, isGeminiSafetyError, sanitizeGeminiKey } from "./gemini.js?v=30";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
@@ -70,6 +96,9 @@ const state = {
   attachBusy: false,
   _projectPromptTimer: null,
   _projectPromptDirty: false,
+  _projectMemoryTimer: null,
+  _projectMemoryDirty: false,
+  compressing: false,
 };
 
 const MAX_ATTACH = 6;
@@ -122,6 +151,14 @@ function syncSettingsUi() {
   $("#sql-box").textContent = supabaseSql();
   $("#inp-gclient").value = s.googleClientId || "";
   $("#chk-g-auto").checked = !!s.googleAutoBackup;
+  if ($("#inp-geminikey")) $("#inp-geminikey").value = s.geminiApiKey || "";
+  if ($("#sel-compress-engine")) $("#sel-compress-engine").value = s.compressEngine === "grok" ? "grok" : "gemini";
+  if ($("#chk-auto-compress")) $("#chk-auto-compress").checked = s.autoCompress !== false;
+  if ($("#gemini-hint")) {
+    $("#gemini-hint").textContent = s.geminiApiKey
+      ? `保存済み ${maskKey(s.geminiApiKey)}`
+      : "未設定（空なら圧縮は Grok NR）";
+  }
   if ($("#gdrive-help")) $("#gdrive-help").textContent = driveSetupHelp();
   updateDriveStatus();
   fillVoiceSelect();
@@ -399,10 +436,16 @@ function renderSessionItems(list, mount) {
       const active = state.current?.id === c.id ? " active" : "";
       const pin = c.pinned ? `<span class="pin">📌</span>` : "";
       const n = (c.messages || []).length;
+      const p = state.projects.find((x) => x.id === (c.project_id || state.activeProjectId));
+      const badge = c.archived
+        ? `<span class="thread-badge archived">凍結</span>`
+        : p && isLiveThread(c, p)
+          ? `<span class="thread-badge live">本番</span>`
+          : "";
       return `<div class="session-item${active}" data-id="${escapeAttr(c.id)}">
         ${pin}
         <div style="flex:1;min-width:0">
-          <div class="title" title="ダブルクリックで改名">${escapeHtml(c.title || "無題")}</div>
+          <div class="title" title="ダブルクリックで改名">${badge}${escapeHtml(c.title || "無題")}</div>
           <div class="session-meta">${n} msg · ${escapeHtml(relativeTime(c.updated_at))}</div>
         </div>
         <button type="button" class="btn ghost xs btn-ren" title="改名">✎</button>
@@ -450,7 +493,9 @@ function renderWorkspace() {
   const p = state.projects.find((x) => x.id === state.activeProjectId);
   $("#ws-name").textContent = p?.name || "プロジェクト";
   fillProjectPrompt(p);
+  fillProjectMemory(p);
   renderSessionItems(state.projectChats, $("#thread-list"));
+  syncComposerLock();
   const fl = $("#file-list");
   if (!state.files.length) {
     fl.innerHTML = `<div class="muted sm">資料がまだない。世界観ノートを入れてくれ。</div>`;
@@ -525,8 +570,53 @@ function saveProjectSystemPromptSoon() {
   }, 500);
 }
 
+function memoryFieldBusy() {
+  const ta = $("#project-progress-memory");
+  return !!ta && (document.activeElement === ta || state._projectMemoryDirty);
+}
+
+function fillProjectMemory(p) {
+  const ta = $("#project-progress-memory");
+  const mark = $("#project-memory-mark");
+  const text = (p?.progress_memory || "").trim();
+  if (mark) mark.textContent = text ? "入ってる" : "";
+  if (!ta) return;
+  if (document.activeElement === ta || state._projectMemoryDirty) return;
+  ta.value = p?.progress_memory || "";
+}
+
+async function flushProjectMemory() {
+  clearTimeout(state._projectMemoryTimer);
+  state._projectMemoryTimer = null;
+  if (!state._projectMemoryDirty) return;
+  const pid = state.activeProjectId;
+  const ta = $("#project-progress-memory");
+  if (!pid || !ta) {
+    state._projectMemoryDirty = false;
+    return;
+  }
+  const next = ta.value || "";
+  state._projectMemoryDirty = false;
+  const p = await getProject(pid);
+  if (!p) return;
+  if ((p.progress_memory || "") === next) return;
+  await saveProject({ ...p, progress_memory: next });
+  const local = state.projects.find((x) => x.id === pid);
+  if (local) local.progress_memory = next;
+  if (state.activeProjectId === pid) fillProjectMemory({ ...p, progress_memory: next });
+}
+
+function saveProjectMemorySoon() {
+  state._projectMemoryDirty = true;
+  clearTimeout(state._projectMemoryTimer);
+  state._projectMemoryTimer = setTimeout(() => {
+    flushProjectMemory().catch((e) => console.warn("project memory save", e));
+  }, 500);
+}
+
 async function openProject(id) {
   await flushProjectSystemPrompt();
+  await flushProjectMemory();
   if (state.activeProjectId === id) {
     await leaveProject();
     return;
@@ -538,6 +628,7 @@ async function openProject(id) {
 
 async function leaveProject() {
   await flushProjectSystemPrompt();
+  await flushProjectMemory();
   state.activeProjectId = null;
   state.ragSelectedSources = [];
   await refreshLists();
@@ -547,6 +638,7 @@ async function createProject() {
   const name = prompt("プロジェクト名", "おこた篇") || "";
   if (!name.trim()) return;
   await flushProjectSystemPrompt();
+  await flushProjectMemory();
   const p = await saveProject(emptyProject({ name: name.trim() }));
   state.activeProjectId = p.id;
   state.ragSelectedSources = [];
@@ -571,6 +663,8 @@ async function createChat({ projectId = null } = {}) {
     toast("生成中だよ", "error");
     return;
   }
+  await flushProjectSystemPrompt();
+  await flushProjectMemory();
   const chat = emptyChat({
     title: defaultTitle(projectId),
     system_prompt: settings().systemPrompt,
@@ -616,7 +710,14 @@ async function togglePin(id) {
 
 async function removeChat(id) {
   if (!confirm("この会話を消す？端末からも消えるよ。")) return;
+  const doomed = await getChat(id);
   await deleteChat(id);
+  if (doomed?.project_id && doomed.id) {
+    const p = await getProject(doomed.project_id);
+    if (p?.live_thread_id === doomed.id) {
+      await saveProject({ ...p, live_thread_id: null });
+    }
+  }
   if (state.current?.id === id) state.current = null;
   await refreshLists();
   renderMessages();
@@ -724,17 +825,85 @@ function avatarImg(role) {
   return `<img class="msg-avatar" src="${src}" width="36" height="36" alt="" onerror="this.onerror=null;this.src='./icons/icon-192.png'" />`;
 }
 
+function renderHandoffHtml(chat) {
+  const p = state.projects.find((x) => x.id === (chat?.project_id || state.activeProjectId));
+  if (!chat || !p || !isLiveThread(chat, p)) return "";
+  const items = remainingHandoff(p);
+  if (!items.length) return "";
+  const body = items
+    .map((m) => {
+      const who = m.role === "user" ? "まろ" : "グリク";
+      const text = escapeHtml(contentAsText(m.content)).slice(0, 4000);
+      return `<div class="handoff-turn"><div class="handoff-who">${who}</div>${text}</div>`;
+    })
+    .join("");
+  return `<details class="handoff-box"><summary>前から引き継ぎ · ${items.length}発言</summary>${body}</details>`;
+}
+
+function syncComposerLock() {
+  const archived = !!state.current?.archived;
+  const banner = $("#archive-banner");
+  if (banner) banner.hidden = !archived;
+  const input = $("#input");
+  if (input) input.disabled = archived;
+  const attach = $("#btn-attach");
+  if (attach) attach.disabled = archived;
+  const send = $("#btn-send");
+  if (send) send.disabled = archived || state.streaming || state.attachBusy;
+  const freeze = $("#btn-freeze-continue");
+  if (freeze) {
+    const p = state.projects.find((x) => x.id === state.activeProjectId);
+    const writable = !!(state.current && p && canWriteMemory(state.current, p));
+    freeze.hidden = !state.activeProjectId;
+    freeze.disabled = !writable || state.streaming || state.compressing;
+  }
+  const boot = $("#btn-memory-bootstrap");
+  if (boot) {
+    const p = state.projects.find((x) => x.id === state.activeProjectId);
+    const writable = !!(state.current && p && canWriteMemory(state.current, p));
+    boot.disabled = !writable || state.streaming || state.compressing;
+  }
+  updateMemoryHint();
+}
+
+function updateMemoryHint() {
+  const el = $("#memory-hint");
+  if (!el) return;
+  const chat = state.current;
+  if (!chat) {
+    el.hidden = true;
+    return;
+  }
+  const p = state.projects.find((x) => x.id === (chat.project_id || state.activeProjectId));
+  const st = windowStats(p || null, chat, WINDOW_CHARS);
+  if (!chat.project_id) {
+    el.hidden = false;
+    el.textContent = `API窓 ${st.used}/${WINDOW_CHARS}`;
+    return;
+  }
+  el.hidden = false;
+  const bits = [`窓 ${st.used}/${WINDOW_CHARS}`];
+  if (st.live) bits.push("本番");
+  if (chat.archived) bits.push("凍結");
+  if (st.overflowChars) bits.push(`溢れ ${st.overflowChars}`);
+  if (st.handoffCount) bits.push(`引き継ぎ ${st.handoffCount}`);
+  if (state.compressing) bits.push("圧縮中");
+  el.textContent = bits.join(" · ");
+}
+
 function renderMessages({ scroll = true } = {}) {
   const box = $("#messages");
   const c = state.current;
   syncTitle();
+  syncComposerLock();
+  const handoff = renderHandoffHtml(c);
   if (!c || !(c.messages || []).length) {
-    box.innerHTML = "";
+    box.innerHTML = handoff;
     const empty = document.createElement("div");
     empty.id = "empty-state";
     empty.className = "empty-state";
     empty.innerHTML = `<img src="./icons/icon-192.png" width="72" height="72" alt="" class="empty-icon" />
-      <h1>${c ? "最初の一言をどうぞ" : "今夜も、星の下であいてるよ"}</h1>
+      <h1>${c ? (handoff ? "続きの一言をどうぞ" : "最初の一言をどうぞ") : "今夜も、星の下であいてるよ"}</h1>
       <p>${c ? "長編でも履歴はこの端末の IndexedDB に残る。" : "Grok API だけで動く長編チャット。過去ログの JSON を落とせば続きから入れる。"}</p>
       <div class="empty-actions">
         <button class="btn primary" type="button" data-act="new">新しいチャット</button>
@@ -750,7 +919,9 @@ function renderMessages({ scroll = true } = {}) {
     box.appendChild(empty);
     return;
   }
-  box.innerHTML = c.messages
+  box.innerHTML =
+    handoff +
+    c.messages
     .map((m, i) => {
       const role = m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "system";
       if (role === "system") return "";
@@ -780,7 +951,7 @@ function renderMessages({ scroll = true } = {}) {
           </div>
         </article>`;
       }
-      const actions = state.streaming
+      const actions = state.streaming || c.archived
         ? ""
         : role === "user"
           ? `<div class="msg-actions">
@@ -911,14 +1082,14 @@ function toApiContent(m, { includeImages = true } = {}) {
   return parts;
 }
 
-function buildApiMessages(chat, extraSystem) {
+function buildApiMessages(chat, extraSystem, rawMessages) {
   const sysParts = [];
   if (chat.system_prompt) sysParts.push(chat.system_prompt);
   if (extraSystem) sysParts.push(extraSystem);
   const out = [];
   if (sysParts.length) out.push({ role: "system", content: sysParts.join("\n\n") });
-  const msgs = chat.messages || [];
-  // 長編保護: だいたい 350k 文字で古い順に落とす
+  const msgs = rawMessages || chat.messages || [];
+  // 長編保護: 直近Nのあとの最後の保険。だいたい 350k 文字
   const acc = [];
   let used = 0;
   for (let i = msgs.length - 1; i >= 0; i--) {
@@ -1189,6 +1360,10 @@ async function sendMessage() {
   if (!state.current) {
     await createChat({ projectId: state.activeProjectId });
   }
+  if (state.current?.archived) {
+    toast("凍結済み。続きスレッドで打ってくれ", "error");
+    return;
+  }
   const chat = state.current;
   const msg = { role: "user", content: text };
   if (atts.length) msg.attachments = atts;
@@ -1219,6 +1394,7 @@ function confirmTruncate(keepThroughIndex, reason) {
 
 function startEditUser(i) {
   if (state.streaming) return;
+  if (state.current?.archived) return;
   const m = state.current?.messages?.[i];
   if (!m || m.role !== "user") return;
   state.editingIndex = i;
@@ -1234,6 +1410,10 @@ async function commitEditUser(i) {
   if (state.streaming) return;
   const chat = state.current;
   if (!chat) return;
+  if (chat.archived) {
+    toast("凍結済み。編集できない", "error");
+    return;
+  }
   const ta = document.querySelector(`.edit-input[data-edit-i="${i}"]`);
   const text = (ta?.value || "").trim();
   const keptAtts = chat.messages[i].attachments;
@@ -1269,19 +1449,36 @@ async function commitEditUser(i) {
 async function runGeneration() {
   const chat = state.current;
   if (!chat) return;
+  if (chat.archived) {
+    toast("凍結済み。続きスレッドで打ってくれ", "error");
+    return;
+  }
   await flushProjectSystemPrompt();
+  await flushProjectMemory();
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
   const query = messagePlainText(lastUser || {});
 
   let extra = "";
   let ragMeta = null;
+  let proj = null;
+  let rawMessages = chat.messages || [];
   if (chat.project_id || state.activeProjectId) {
     const pid = chat.project_id || state.activeProjectId;
-    const proj = await getProject(pid);
+    proj = await getProject(pid);
     const files = await listFiles(pid);
     const sources = getRagSourcesForSend();
     const ragEnabled = !(sources && sources.length === 0);
+    if (proj && !chat.archived && chat.project_id === proj.id && !proj.live_thread_id) {
+      proj = await saveProject({ ...proj, live_thread_id: chat.id });
+      const local = state.projects.find((x) => x.id === pid);
+      if (local) local.live_thread_id = chat.id;
+      toast("このスレッドを本番にした", "ok");
+    }
+    const live = isLiveThread(chat, proj);
     if (proj?.system_prompt) extra += (extra ? "\n\n" : "") + proj.system_prompt;
+    if (live && (proj?.progress_memory || "").trim()) {
+      extra += (extra ? "\n\n" : "") + "【進行メモリ】\n" + proj.progress_memory.trim();
+    }
     if (ragEnabled && query) {
       const retrieved = retrieveFromFiles(files, query, {
         topK: settings().ragTopK,
@@ -1300,9 +1497,16 @@ async function runGeneration() {
         sources_filter_count: sources ? sources.length : 0,
       };
     }
+    const auto = settings().autoCompress !== false;
+    rawMessages = selectApiMessages(proj, chat, {
+      keepOverflow: live && auto,
+      windowChars: WINDOW_CHARS,
+    });
+  } else {
+    rawMessages = selectApiMessages(null, chat, { keepOverflow: false, windowChars: WINDOW_CHARS });
   }
 
-  const apiMessages = buildApiMessages(chat, extra);
+  const apiMessages = buildApiMessages(chat, extra, rawMessages);
   const assistant = { role: "assistant", content: "", rag: ragMeta || undefined };
   chat.messages.push(assistant);
   renderMessages();
@@ -1353,6 +1557,7 @@ async function runGeneration() {
     await refreshLists();
     refreshCredits({ force: true, silent: true });
     if (settings().autoSpeak && assistant.content) speakAssistant(assistant.content);
+    if (chat.project_id) scheduleCompress(chat.id, chat.project_id);
   } catch (e) {
     if (e.name === "AbortError") {
       assistant.content = (assistant.content || "") + (assistant.content ? "" : "（停止）");
@@ -1366,7 +1571,7 @@ async function runGeneration() {
     state.streaming = false;
     state.abort = null;
     $("#btn-stop").hidden = true;
-    $("#btn-send").disabled = false;
+    syncComposerLock();
   }
 }
 
@@ -1376,6 +1581,243 @@ function stopGeneration() {
   } catch {
     /* ignore */
   }
+}
+
+function scheduleCompress(chatId, projectId) {
+  if (!chatId || !projectId) return;
+  if (state.compressing) return;
+  if (settings().autoCompress === false) return;
+  maybeCompress({ chatId, projectId, reason: "auto" }).catch((e) => console.warn("compress", e));
+}
+
+async function compressText(prompt) {
+  const s = settings();
+  const engine = s.compressEngine === "grok" ? "grok" : "gemini";
+  let lastErr = null;
+  if (engine === "gemini") {
+    try {
+      const r = await geminiGenerateText(s, prompt);
+      if (r?.model && r.model !== s.geminiCompressModel) persistSettings({ geminiCompressModel: r.model });
+      return { text: r.text, used: "gemini", model: r.model };
+    } catch (e) {
+      lastErr = e;
+      if (isGeminiSafetyError(e)) {
+        persistSettings({ compressEngine: "grok" });
+        toast("Geminiが拒否した。圧縮は Grok に切った", "error");
+      } else if (e.code !== "NO_KEY") {
+        console.warn("gemini compress", e);
+      }
+    }
+  }
+  const grok = await chatComplete(s, {
+    model: "grok-4.20-0309-non-reasoning",
+    messages: [
+      { role: "system", content: "進行メモリのフォームだけを出力する。前置き禁止。" },
+      { role: "user", content: prompt },
+    ],
+    temperature: 0.2,
+    maxTokens: 2048,
+  });
+  return { text: grok.content || "", used: "grok", model: grok.model, priorError: lastErr };
+}
+
+async function applyCompressedMemory({ chat, project, chunk, text }) {
+  if (memoryFieldBusy()) {
+    const err = new Error("メモリ欄を編集中なので書けない");
+    err.code = "BUSY";
+    throw err;
+  }
+  const nextMem = capMemory(stripFences(text), MEMORY_CAP);
+  if (!looksLikeForm(nextMem) || looksLikeRefusal(nextMem)) {
+    const err = new Error("圧縮結果がフォームじゃない");
+    err.code = "COLLAPSE";
+    throw err;
+  }
+  markFolded(chunk);
+  pruneHandoff(project);
+  project.progress_memory = nextMem;
+  const savedP = await saveProject(project);
+  const savedC = await saveChat(chat);
+  const local = state.projects.find((x) => x.id === savedP.id);
+  if (local) {
+    local.progress_memory = savedP.progress_memory;
+    local.handoff = savedP.handoff;
+    local.live_thread_id = savedP.live_thread_id;
+  }
+  if (state.current?.id === savedC.id) state.current = savedC;
+  fillProjectMemory(savedP);
+  return { project: savedP, chat: savedC, memory: nextMem };
+}
+
+async function maybeCompress({ chatId, projectId, reason = "auto", forceChunk = null } = {}) {
+  if (state.compressing) return { skipped: "busy" };
+  state.compressing = true;
+  syncComposerLock();
+  try {
+    const chat = await getChat(chatId);
+    let project = await getProject(projectId);
+    if (!chat || !project) return { skipped: "missing" };
+    if (chat.archived) return { skipped: "archived" };
+    if (!isLiveThread(chat, project)) return { skipped: "not-live" };
+    if (memoryFieldBusy()) return { skipped: "editing" };
+
+    const items = collectRawItems(project, chat, { includeHandoff: true });
+    const { overflow } = splitWindow(items, WINDOW_CHARS);
+    const oChars = overflowChars(overflow);
+    const emptyMem = !(project.progress_memory || "").trim();
+    let pick = forceChunk;
+    if (!pick) {
+      if (reason === "auto") {
+        const enough = oChars >= OVERFLOW_MIN || (emptyMem && oChars > 0);
+        if (!enough) return { skipped: "small" };
+      }
+      if (!overflow.length) return { skipped: "none" };
+      const max = reason === "handoff" || reason === "bootstrap" ? HANDOFF_CHUNK : CHUNK_CHARS;
+      pick = chunkOverflow(overflow, max).chunk;
+    }
+    if (!pick.length) return { skipped: "none" };
+    const chunkText = formatChunk(pick);
+    if (!chunkText.trim()) return { skipped: "empty" };
+    const prompt = buildCompressPrompt({
+      memory: project.progress_memory || "",
+      chunkText,
+      cap: MEMORY_CAP,
+    });
+    const result = await compressText(prompt);
+    const applied = await applyCompressedMemory({ chat, project, chunk: pick, text: result.text });
+    if (reason === "auto") {
+      updateMemoryHint();
+    } else {
+      await refreshLists();
+      renderMessages({ scroll: false });
+      toast(reason === "bootstrap" ? "メモリを作った" : "進行メモリを折った", "ok");
+    }
+    return { ok: true, used: result.used, memory: applied.memory };
+  } catch (e) {
+    if (e.code === "BUSY") return { skipped: "editing" };
+    console.warn("compress failed", e);
+    toast("圧縮は落ちた。この回は生ログのまま", "error");
+    return { failed: true, error: e };
+  } finally {
+    state.compressing = false;
+    syncComposerLock();
+  }
+}
+
+async function bootstrapMemoryFromLog() {
+  if (state.streaming || state.compressing) {
+    toast("生成中か圧縮中だよ", "error");
+    return;
+  }
+  await flushProjectSystemPrompt();
+  await flushProjectMemory();
+  const chat = state.current;
+  if (!chat?.project_id) {
+    toast("プロジェクトの本番スレッドで押してくれ", "error");
+    return;
+  }
+  let project = await getProject(chat.project_id);
+  if (!project || chat.archived) {
+    toast("生きてるスレッドだけ", "error");
+    return;
+  }
+  if (!project.live_thread_id) {
+    project = await saveProject({ ...project, live_thread_id: chat.id });
+    const local = state.projects.find((x) => x.id === project.id);
+    if (local) local.live_thread_id = chat.id;
+  }
+  if (!isLiveThread(chat, project)) {
+    toast("本番スレッドだけ。OOCからは作らない", "error");
+    return;
+  }
+  const items = collectRawItems(project, chat, { includeHandoff: true });
+  const { overflow } = splitWindow(items, WINDOW_CHARS);
+  if (!overflow.length) {
+    toast("まだ窓に収まってる。作る分がない", "ok");
+    return;
+  }
+  toast("ログからメモリを作る…", "ok");
+  await maybeCompress({ chatId: chat.id, projectId: chat.project_id, reason: "bootstrap" });
+}
+
+async function freezeAndContinue() {
+  if (state.streaming || state.compressing) {
+    toast("生成中か圧縮中だよ", "error");
+    return;
+  }
+  const chat = state.current;
+  if (!chat?.project_id) {
+    toast("プロジェクトのスレッドだけ", "error");
+    return;
+  }
+  if (chat.archived) {
+    toast("もう凍結済み", "error");
+    return;
+  }
+  if (!confirm("このスレッドを凍結して続きを開く。もう書けなくなる。いい？")) return;
+  await flushProjectSystemPrompt();
+  await flushProjectMemory();
+  let project = await getProject(chat.project_id);
+  if (!project) {
+    toast("プロジェクトがない", "error");
+    return;
+  }
+  if (!project.live_thread_id) {
+    project = await saveProject({ ...project, live_thread_id: chat.id });
+    const local = state.projects.find((x) => x.id === project.id);
+    if (local) local.live_thread_id = chat.id;
+  }
+  if (!isLiveThread(chat, project)) {
+    toast("本番スレッドじゃない", "error");
+    return;
+  }
+
+  const before = collectRawItems(project, chat, { includeHandoff: true });
+  const split = splitWindow(before, WINDOW_CHARS);
+  if (split.overflow.length) {
+    toast("引き継ぎの前に一回折る…", "ok");
+    const folded = await maybeCompress({
+      chatId: chat.id,
+      projectId: chat.project_id,
+      reason: "handoff",
+    });
+    if (folded?.failed) {
+      toast("圧縮は落ちた。生ログのまま引き継ぐ", "error");
+    }
+  }
+
+  const freshChat = await getChat(chat.id);
+  project = await getProject(chat.project_id);
+  const items = collectRawItems(project, freshChat, { includeHandoff: true });
+  const { recent } = splitWindow(items, WINDOW_CHARS);
+  project.handoff = {
+    from_thread_id: freshChat.id,
+    from_title: freshChat.title || "",
+    messages: cloneHandoffMessages(recent),
+  };
+  freshChat.archived = true;
+  await saveChat(freshChat);
+
+  const next = emptyChat({
+    title: defaultTitle(freshChat.project_id),
+    system_prompt: settings().systemPrompt,
+    model: settings().model,
+    project_id: freshChat.project_id,
+  });
+  project.live_thread_id = next.id;
+  await saveProject(project);
+  state.current = await saveChat(next);
+  const local = state.projects.find((x) => x.id === project.id);
+  if (local) {
+    local.handoff = project.handoff;
+    local.live_thread_id = project.live_thread_id;
+    local.progress_memory = project.progress_memory;
+  }
+  await refreshLists();
+  renderMessages();
+  closeDrawers();
+  $("#input")?.focus();
+  toast("凍結した。続きスレッドを開いた", "ok");
 }
 
 function speakAssistant(text) {
@@ -1498,11 +1940,22 @@ function bind() {
   $("#project-system-prompt")?.addEventListener("blur", () => {
     flushProjectSystemPrompt().catch((e) => console.warn("project prompt save", e));
   });
+  $("#project-progress-memory")?.addEventListener("input", saveProjectMemorySoon);
+  $("#project-progress-memory")?.addEventListener("blur", () => {
+    flushProjectMemory().catch((e) => console.warn("project memory save", e));
+  });
+  $("#btn-freeze-continue")?.addEventListener("click", () => {
+    freezeAndContinue().catch((e) => toast(String(e.message || e), "error"));
+  });
+  $("#btn-memory-bootstrap")?.addEventListener("click", () => {
+    bootstrapMemoryFromLog().catch((e) => toast(String(e.message || e), "error"));
+  });
   $("#btn-delete-project").addEventListener("click", async () => {
     const p = state.projects.find((x) => x.id === state.activeProjectId);
     if (!p) return;
     if (!confirm(`「${p.name}」を消す？資料も消える。スレッドは全体チャット側に残る。`)) return;
     await flushProjectSystemPrompt();
+    await flushProjectMemory();
     await deleteProject(p.id);
     state.activeProjectId = null;
     state.ragSelectedSources = [];
@@ -1764,6 +2217,18 @@ function bind() {
   $("#chk-websearch").addEventListener("change", () => {
     persistSettings({ webSearch: $("#chk-websearch").checked });
   });
+  $("#btn-save-gemini")?.addEventListener("click", () => {
+    const geminiApiKey = sanitizeGeminiKey($("#inp-geminikey")?.value || "");
+    persistSettings({ geminiApiKey });
+    if ($("#inp-geminikey")) $("#inp-geminikey").value = geminiApiKey;
+    toast(geminiApiKey ? "Geminiキー保存した" : "Geminiキーを消した", geminiApiKey ? "ok" : "error");
+  });
+  $("#sel-compress-engine")?.addEventListener("change", () => {
+    persistSettings({ compressEngine: $("#sel-compress-engine").value === "grok" ? "grok" : "gemini" });
+  });
+  $("#chk-auto-compress")?.addEventListener("change", () => {
+    persistSettings({ autoCompress: $("#chk-auto-compress").checked });
+  });
   $("#btn-save-system").addEventListener("click", () => {
     persistSettings({ systemPrompt: $("#inp-system").value });
     if (state.current) {
@@ -1888,7 +2353,11 @@ function bind() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") persistCurrent();
+    if (document.visibilityState === "hidden") {
+      persistCurrent();
+      flushProjectSystemPrompt().catch(() => {});
+      flushProjectMemory().catch(() => {});
+    }
     if (document.visibilityState === "visible" && settings().mgmtKey) {
       refreshCredits({ silent: true });
     }
