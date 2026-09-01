@@ -327,22 +327,15 @@ export function formatUsd(n) {
   });
 }
 
-/**
- * usage 集計の年月。
- * invoice.billingCycle.year は信用しない（実測: 壁時計 2026-09 なのに 2025-09 が返る）。
- * コンソールのライブ残に合わせるため、常に UTC の今月で集計する。
- */
-export function resolveBillingCycle(_cycle) {
-  const now = new Date();
-  return { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
+/** クレジット計算のビルド印。ステータスに出してキャッシュ残りを見抜く。 */
+export const CREDIT_CALC_BUILD = 29;
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
 }
 
-function cycleTimeRange({ year, month }) {
-  const start = `${year}-${String(month).padStart(2, "0")}-01 00:00:00`;
-  const nextMonth = month === 12 ? 1 : month + 1;
-  const nextYear = month === 12 ? year + 1 : year;
-  const end = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01 00:00:00`;
-  return { startTime: start, endTime: end, timezone: "Etc/GMT" };
+function formatUsageTimestamp(d) {
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
 }
 
 function sumUsageUsd(payload) {
@@ -358,62 +351,155 @@ function sumUsageUsd(payload) {
   return sum;
 }
 
-/** 台帳に既に載ってる今サイクルの SPEND（USD）。二重引き防止用。 */
-function postedSpendUsdForCycle(balance, { year, month }) {
-  let sum = 0;
-  for (const ch of balance?.changes || []) {
-    if (String(ch.changeOrigin || "") !== "SPEND") continue;
-    if (Number(ch.spendBpKeyYear) !== year || Number(ch.spendBpKeyMonth) !== month) continue;
-    const n = usdAbsFromCents(ch.amount);
-    if (n != null) sum += n;
-  }
-  return sum;
+function changeTimeMs(ch) {
+  const raw = ch?.createTime || ch?.createTs || "";
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : 0;
 }
 
 /**
- * ライブ残の計算。
- * prepaid/balance.total は締め後台帳で、サイクル途中の消費が遅れて載る。
- * postpaid invoice の prepaidCreditsUsed は prepaid 専用アカウントだと 0 のまま。
- * なので usage API の今サイクル USD を使い、未反映分だけ台帳から引く。
+ * 月次締めの SPEND と同刻・同額の PURCHASE は「振替」で、まろが買った分じゃない。
+ * 実測: 2025-09-01T17:42:07 に SPEND +2500 と PURCHASE -2500 が同時。
  */
-export function parseCreditSnapshot(balance, invoice, cycleUsageUsd = null) {
+function isPhantomRolloverPurchase(ch, spendByTime) {
+  const origin = String(ch?.changeOrigin || "");
+  if (origin !== "PURCHASE" && origin !== "AUTO_PURCHASE") return false;
+  const t = ch?.createTime || ch?.createTs || "";
+  if (!t || !spendByTime.has(t)) return false;
+  const purchaseUsd = usdAbsFromCents(ch.amount);
+  const spendUsd = spendByTime.get(t);
+  if (purchaseUsd == null || spendUsd == null) return false;
+  return Math.abs(purchaseUsd - spendUsd) < 0.011;
+}
+
+/**
+ * ライブ残の基準になる「本物の入金」。
+ * 振替 PURCHASE を除いた直近の PURCHASE / AUTO_PURCHASE / MANUAL(付与)。
+ */
+export function findCreditAnchor(balance) {
+  const changes = Array.isArray(balance?.changes) ? balance.changes : [];
+  const spendByTime = new Map();
+  for (const ch of changes) {
+    if (String(ch?.changeOrigin || "") !== "SPEND") continue;
+    const t = ch.createTime || ch.createTs;
+    if (!t) continue;
+    const usd = usdAbsFromCents(ch.amount);
+    if (usd != null) spendByTime.set(t, usd);
+  }
+
+  let best = null;
+  for (const ch of changes) {
+    const origin = String(ch?.changeOrigin || "");
+    const usd = usdAbsFromCents(ch.amount);
+    if (usd == null || usd < 0.0001) continue;
+
+    let kind = null;
+    if (origin === "PURCHASE" || origin === "AUTO_PURCHASE") {
+      if (isPhantomRolloverPurchase(ch, spendByTime)) continue;
+      kind = "purchase";
+    } else if (origin === "MANUAL") {
+      // MANUAL は符号付き。クレジット付与は ledger 上ネガティブ（絶対値が増加）
+      const raw = centsToNumber(ch.amount);
+      if (raw == null || raw >= 0) continue;
+      kind = "manual";
+    } else {
+      continue;
+    }
+
+    const ms = changeTimeMs(ch);
+    if (!ms) continue;
+    if (!best || ms >= best.ms) {
+      best = {
+        ms,
+        usd,
+        kind,
+        createTime: ch.createTime || ch.createTs,
+        origin,
+      };
+    }
+  }
+  return best;
+}
+
+function usageWindowFromAnchor(anchor, balance) {
+  const start = new Date(anchor.ms);
+  start.setUTCHours(0, 0, 0, 0);
+
+  let endMs = Date.now() + 86400000;
+  for (const ch of balance?.changes || []) {
+    const ms = changeTimeMs(ch);
+    if (ms > endMs) endMs = ms + 86400000;
+  }
+  // API 側の時計が壁時計より昔の年でも、アンカー以降〜十分先まで取る
+  const end = new Date(endMs);
+  if (end.getTime() - start.getTime() < 86400000) {
+    end.setUTCDate(end.getUTCDate() + 2);
+  }
+
+  return {
+    startTime: formatUsageTimestamp(start),
+    endTime: formatUsageTimestamp(end),
+    timezone: "Etc/GMT",
+  };
+}
+
+/**
+ * ライブ残 = 本物の入金額 − その時点からの全消費。
+ * 「今月だけ」だと締め前の消費が抜けてコンソールより高く出る。
+ */
+export function parseCreditSnapshot(balance, invoice, usageSinceAnchorUsd = null, anchor = null) {
   const ledgerUsd = usdAbsFromCents(balance?.total) ?? usdAbsFromCents(invoice?.coreInvoice?.prepaidCredits);
   const invoiceUsed = usdAbsFromCents(invoice?.coreInvoice?.prepaidCreditsUsed) ?? 0;
-  const cycle = resolveBillingCycle(invoice?.billingCycle);
-  const postedSpend = postedSpendUsdForCycle(balance, cycle);
+  const resolvedAnchor = anchor || findCreditAnchor(balance);
 
   let usedUsd = 0;
   let usedSource = "none";
-  if (invoiceUsed > 0.0001) {
+  let remainingUsd = null;
+
+  if (invoiceUsed > 0.0001 && ledgerUsd != null) {
+    // postpaid 混在で invoice が使えるときだけ従来式
     usedUsd = invoiceUsed;
     usedSource = "invoice";
-  } else if (cycleUsageUsd != null && Number.isFinite(cycleUsageUsd)) {
-    usedUsd = Math.max(0, cycleUsageUsd);
+    remainingUsd = Math.max(0, (usdAbsFromCents(invoice?.coreInvoice?.prepaidCredits) ?? ledgerUsd) - invoiceUsed);
+  } else if (resolvedAnchor && usageSinceAnchorUsd != null && Number.isFinite(usageSinceAnchorUsd)) {
+    usedUsd = Math.max(0, usageSinceAnchorUsd);
     usedSource = "usage";
+    remainingUsd = Math.max(0, resolvedAnchor.usd - usedUsd);
+  } else if (ledgerUsd != null) {
+    // usage 失敗時は台帳のみ（コンソールより高く出ることがある）
+    remainingUsd = ledgerUsd;
+    usedUsd = 0;
+    usedSource = "ledger";
   }
 
-  const unpostedUsd = Math.max(0, usedUsd - postedSpend);
-  const remainingUsd = ledgerUsd == null ? null : Math.max(0, ledgerUsd - unpostedUsd);
+  const sinceLabel = resolvedAnchor?.createTime
+    ? String(resolvedAnchor.createTime).slice(0, 10)
+    : null;
 
   return {
     usedUsd,
     remainingUsd,
-    // 互換: 古い UI が purchasedUsd を読む。中身は台帳残（新規購入額ではない）
-    purchasedUsd: ledgerUsd,
+    purchasedUsd: resolvedAnchor?.usd ?? ledgerUsd,
     ledgerUsd,
     usedSource,
-    billingCycle: cycle,
+    anchorUsd: resolvedAnchor?.usd ?? null,
+    usageSince: sinceLabel,
+    billingCycle: sinceLabel
+      ? {
+          year: Number(String(sinceLabel).slice(0, 4)) || null,
+          month: Number(String(sinceLabel).slice(5, 7)) || null,
+        }
+      : null,
+    calcBuild: CREDIT_CALC_BUILD,
   };
 }
 
-async function fetchCycleUsageUsd(settings, teamId, cycle) {
-  const timeRange = cycleTimeRange(cycle);
+async function fetchUsageUsd(settings, teamId, timeRange) {
   const path = `/v1/billing/teams/${encodeURIComponent(teamId)}/usage`;
-  // DAY+description を先に（NONE+空 groupBy は通っても過小合計になることがある）
   const attempts = [
     { timeUnit: "TIME_UNIT_DAY", groupBy: ["description"] },
-    { timeUnit: "TIME_UNIT_NONE", groupBy: [] },
     { timeUnit: "TIME_UNIT_DAY", groupBy: [] },
+    { timeUnit: "TIME_UNIT_NONE", groupBy: [] },
   ];
   let lastErr = null;
   let best = null;
@@ -482,21 +568,27 @@ export async function fetchCreditBalance(settings) {
     }
   }
 
-  const cycle = resolveBillingCycle(invoice?.billingCycle);
   const invoiceUsed = usdAbsFromCents(invoice?.coreInvoice?.prepaidCreditsUsed) ?? 0;
-  let cycleUsageUsd = null;
+  const anchor = findCreditAnchor(balance);
+  let usageSinceAnchorUsd = null;
   let usageError = null;
-  // invoice の使用額が 0 のときだけ usage API を叩く（prepaid 専用対策）
+  let usageRange = null;
+
   if (invoiceUsed <= 0.0001) {
-    try {
-      cycleUsageUsd = await fetchCycleUsageUsd(settings, teamId, cycle);
-    } catch (e) {
-      usageError = String(e.message || e);
-      console.warn("credit usage fetch failed", e);
+    if (!anchor) {
+      usageError = "本物の入金（PURCHASE）が台帳から見つからない";
+    } else {
+      try {
+        usageRange = usageWindowFromAnchor(anchor, balance);
+        usageSinceAnchorUsd = await fetchUsageUsd(settings, teamId, usageRange);
+      } catch (e) {
+        usageError = String(e.message || e);
+        console.warn("credit usage fetch failed", e);
+      }
     }
   }
 
-  const snap = parseCreditSnapshot(balance, invoice, cycleUsageUsd);
+  const snap = parseCreditSnapshot(balance, invoice, usageSinceAnchorUsd, anchor);
   if (snap.remainingUsd == null && snap.purchasedUsd == null) {
     throw new Error("残高の数字がレスポンスから読めなかった");
   }
@@ -506,5 +598,7 @@ export async function fetchCreditBalance(settings) {
     teamIdDetected: detected,
     fetchedAt: Date.now(),
     usageError,
+    usageRange,
+    calcBuild: CREDIT_CALC_BUILD,
   };
 }

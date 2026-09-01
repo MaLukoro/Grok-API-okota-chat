@@ -34,7 +34,7 @@ import {
   saveFile,
   saveProject,
 } from "./db.js";
-import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=28";
+import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=29";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
@@ -221,11 +221,19 @@ function renderCreditUi() {
   box?.classList.toggle("empty", tone === "empty");
   remainingEl.textContent = remaining == null ? "—" : formatUsd(remaining);
 
-  if (snap && (snap.ledgerUsd != null || snap.purchasedUsd != null || snap.usedUsd != null)) {
+  if (snap && (snap.ledgerUsd != null || snap.purchasedUsd != null || snap.usedUsd != null || snap.anchorUsd != null)) {
     const bits = [];
-    const ledger = snap.ledgerUsd ?? snap.purchasedUsd;
-    if (ledger != null) bits.push(`台帳 ${formatUsd(ledger)}`);
-    if (snap.usedUsd != null) bits.push(`今月使用 ${formatUsd(snap.usedUsd)}`);
+    if (snap.anchorUsd != null) bits.push(`入金 ${formatUsd(snap.anchorUsd)}`);
+    else if (snap.ledgerUsd != null || snap.purchasedUsd != null) {
+      bits.push(`台帳 ${formatUsd(snap.ledgerUsd ?? snap.purchasedUsd)}`);
+    }
+    if (snap.usedUsd != null) {
+      const since = snap.usageSince ? `自${snap.usageSince} ` : "";
+      bits.push(`${since}使用 ${formatUsd(snap.usedUsd)}`);
+    }
+    if (snap.ledgerUsd != null && snap.anchorUsd != null && Math.abs(snap.ledgerUsd - snap.anchorUsd) > 0.009) {
+      bits.push(`台帳 ${formatUsd(snap.ledgerUsd)}`);
+    }
     detailEl.textContent = bits.join(" · ");
   } else {
     detailEl.textContent = "";
@@ -239,18 +247,19 @@ function renderCreditUi() {
   if (creditBusy) {
     statusEl.textContent = "残高を取りにいってる…";
   } else if (snap?.usageError) {
-    statusEl.textContent = `使用額の取得失敗（台帳のみ）: ${snap.usageError}`;
+    statusEl.textContent = `使用額の取得失敗（台帳のみ）: ${snap.usageError} · calc v${snap.calcBuild || "?"}`;
   } else if (snap?.fetchedAt) {
     const src =
       snap.usedSource === "usage"
         ? " · 使用=usage"
         : snap.usedSource === "invoice"
           ? " · 使用=invoice"
-          : "";
-    const cy = snap.billingCycle;
-    const cycle =
-      cy?.year && cy?.month ? ` · ${cy.year}-${String(cy.month).padStart(2, "0")}` : "";
-    statusEl.textContent = `最終 ${new Date(snap.fetchedAt).toLocaleString("ja-JP")}${src}${cycle}${s.mgmtKey ? ` · ${maskKey(s.mgmtKey)}` : ""}`;
+          : snap.usedSource === "ledger"
+            ? " · 台帳のみ"
+            : "";
+    const since = snap.usageSince ? ` · since ${snap.usageSince}` : "";
+    const build = ` · calc v${snap.calcBuild || "?"}`;
+    statusEl.textContent = `最終 ${new Date(snap.fetchedAt).toLocaleString("ja-JP")}${src}${since}${build}${s.mgmtKey ? ` · ${maskKey(s.mgmtKey)}` : ""}`;
   } else {
     statusEl.textContent = "まだ取ってない。下の「残量を更新」";
   }
@@ -303,8 +312,12 @@ async function refreshCredits({ force = false, silent = false, fromUi = false } 
         ledgerUsd: snap.ledgerUsd,
         usedUsd: snap.usedUsd,
         usedSource: snap.usedSource,
+        anchorUsd: snap.anchorUsd,
+        usageSince: snap.usageSince || null,
         billingCycle: snap.billingCycle || null,
         usageError: snap.usageError || null,
+        usageRange: snap.usageRange || null,
+        calcBuild: snap.calcBuild,
         teamId: snap.teamId,
         fetchedAt: snap.fetchedAt,
       },
