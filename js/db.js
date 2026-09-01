@@ -72,6 +72,7 @@ export function emptyChat({
     created_at: t,
     updated_at: t,
     pinned: false,
+    archived: false,
     version: 1,
   };
 }
@@ -83,9 +84,34 @@ export function emptyProject({ name = "新しいプロジェクト", description
     name,
     description,
     system_prompt,
+    memory: "",
+    memory_updated_at: 0,
+    carry: null,
+    living_chat_id: null,
+    folded_chat_id: null,
+    folded_count: 0,
     created_at: t,
     updated_at: t,
   };
+}
+
+export function withProjectDefaults(p) {
+  if (!p || typeof p !== "object") return p;
+  const carry = p.carry && typeof p.carry === "object" && Array.isArray(p.carry.messages) ? p.carry : null;
+  return {
+    ...p,
+    memory: typeof p.memory === "string" ? p.memory : "",
+    memory_updated_at: Number(p.memory_updated_at) || 0,
+    carry,
+    living_chat_id: p.living_chat_id || null,
+    folded_chat_id: p.folded_chat_id || null,
+    folded_count: Number(p.folded_count) || 0,
+  };
+}
+
+export function withChatDefaults(c) {
+  if (!c || typeof c !== "object") return c;
+  return { ...c, archived: !!c.archived };
 }
 
 export async function saveChat(chat) {
@@ -102,7 +128,7 @@ export async function saveChat(chat) {
 export async function getChat(id) {
   if (!id) return null;
   const db = await openDb();
-  return reqToPromise(db.transaction("chats").objectStore("chats").get(id));
+  return withChatDefaults(await reqToPromise(db.transaction("chats").objectStore("chats").get(id)));
 }
 
 export async function deleteChat(id) {
@@ -126,7 +152,7 @@ export async function listChats({ projectId = undefined, globalOnly = false } = 
     if (pin) return pin;
     return (b.updated_at || 0) - (a.updated_at || 0);
   });
-  return items;
+  return items.map(withChatDefaults);
 }
 
 export async function saveProject(project) {
@@ -142,7 +168,7 @@ export async function saveProject(project) {
 export async function getProject(id) {
   if (!id) return null;
   const db = await openDb();
-  return reqToPromise(db.transaction("projects").objectStore("projects").get(id));
+  return withProjectDefaults(await reqToPromise(db.transaction("projects").objectStore("projects").get(id)));
 }
 
 export async function deleteProject(id) {
@@ -177,7 +203,9 @@ export async function deleteProject(id) {
 export async function listProjects() {
   const db = await openDb();
   const all = await reqToPromise(db.transaction("projects").objectStore("projects").getAll());
-  return (all || []).sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+  return (all || [])
+    .map(withProjectDefaults)
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
 }
 
 export async function saveFile(file) {

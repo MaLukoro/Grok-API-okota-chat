@@ -18,7 +18,7 @@ import {
   renderSoftMarkdown,
   toast,
 } from "./util.js";
-import { FALLBACK_MODELS, VOICES, loadSettings, maskKey, saveSettings } from "./settings.js";
+import { FALLBACK_MODELS, VOICES, loadSettings, maskKey } from "./settings.js";
 import {
   deleteChat,
   deleteFile,
@@ -33,8 +33,22 @@ import {
   saveChat,
   saveFile,
   saveProject,
+  withProjectDefaults,
 } from "./db.js";
 import { chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js";
+import { sanitizeGeminiKey } from "./gemini.js";
+import {
+  COMPRESS_BATCH_MIN,
+  applyFold,
+  foldChunk,
+  foldChunkFromPlan,
+  isLivingThread,
+  livingExists,
+  memoryInjectBlock,
+  planApiWindow,
+  shouldAutoFold,
+  snapshotCarry,
+} from "./memory.js";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
@@ -70,6 +84,10 @@ const state = {
   attachBusy: false,
   _projectPromptTimer: null,
   _projectPromptDirty: false,
+  _projectMemoryTimer: null,
+  _projectMemoryDirty: false,
+  compressing: false,
+  freezing: false,
 };
 
 const MAX_ATTACH = 6;
@@ -123,6 +141,17 @@ function syncSettingsUi() {
   $("#inp-gclient").value = s.googleClientId || "";
   $("#chk-g-auto").checked = !!s.googleAutoBackup;
   if ($("#gdrive-help")) $("#gdrive-help").textContent = driveSetupHelp();
+  if ($("#inp-geminikey")) $("#inp-geminikey").value = s.geminiKey || "";
+  if ($("#sel-compress")) $("#sel-compress").value = s.compressProvider === "xai" ? "xai" : "gemini";
+  if ($("#chk-auto-compress")) $("#chk-auto-compress").checked = s.autoCompress !== false;
+  if ($("#chk-auto-compress-settings")) $("#chk-auto-compress-settings").checked = s.autoCompress !== false;
+  if ($("#gemini-hint")) {
+    $("#gemini-hint").textContent = s.geminiKey
+      ? `保存済み ${maskKey(s.geminiKey)} · ${s.compressProvider === "xai" ? "圧縮は Grok NR" : "圧縮は Gemini Lite"}`
+      : s.compressProvider === "xai"
+        ? "Geminiキーなし · 圧縮は Grok NR"
+        : "Geminiキー未設定。無料枠で圧縮するなら入れてくれ";
+  }
   updateDriveStatus();
   fillVoiceSelect();
   fillModelSelect();
@@ -365,16 +394,26 @@ function renderSessionItems(list, mount) {
     mount.innerHTML = `<div class="muted sm">会話なし</div>`;
     return;
   }
-  mount.innerHTML = list
+  const livingId = state.projects.find((p) => p.id === state.activeProjectId)?.living_chat_id;
+  const sorted = [...list].sort((a, b) => {
+    const ar = (a.archived ? 1 : 0) - (b.archived ? 1 : 0);
+    if (ar) return ar;
+    const pin = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+    if (pin) return pin;
+    return (b.updated_at || 0) - (a.updated_at || 0);
+  });
+  mount.innerHTML = sorted
     .map((c) => {
       const active = state.current?.id === c.id ? " active" : "";
+      const archived = c.archived ? " archived" : "";
+      const living = !c.archived && livingId && c.id === livingId ? " living" : "";
       const pin = c.pinned ? `<span class="pin">📌</span>` : "";
       const n = (c.messages || []).length;
-      return `<div class="session-item${active}" data-id="${escapeAttr(c.id)}">
+      return `<div class="session-item${active}${archived}${living}" data-id="${escapeAttr(c.id)}">
         ${pin}
         <div style="flex:1;min-width:0">
           <div class="title" title="ダブルクリックで改名">${escapeHtml(c.title || "無題")}</div>
-          <div class="session-meta">${n} msg · ${escapeHtml(relativeTime(c.updated_at))}</div>
+          <div class="session-meta">${n} msg · ${escapeHtml(relativeTime(c.updated_at))}${c.archived ? " · 読専" : ""}</div>
         </div>
         <button type="button" class="btn ghost xs btn-ren" title="改名">✎</button>
         <button type="button" class="btn ghost xs btn-pin" title="ピン">${c.pinned ? "📍" : "📌"}</button>
@@ -421,6 +460,7 @@ function renderWorkspace() {
   const p = state.projects.find((x) => x.id === state.activeProjectId);
   $("#ws-name").textContent = p?.name || "プロジェクト";
   fillProjectPrompt(p);
+  fillProjectMemory(p);
   renderSessionItems(state.projectChats, $("#thread-list"));
   const fl = $("#file-list");
   if (!state.files.length) {
@@ -467,6 +507,21 @@ function fillProjectPrompt(p) {
   ta.value = p?.system_prompt || "";
 }
 
+function fillProjectMemory(p) {
+  const ta = $("#project-memory");
+  const mark = $("#project-memory-mark");
+  const mem = (p?.memory || "").trim();
+  if (mark) mark.textContent = mem ? "入ってる" : "";
+  if (!ta) return;
+  if (document.activeElement === ta || state._projectMemoryDirty) return;
+  ta.value = p?.memory || "";
+}
+
+function memoryFieldBusy() {
+  const ta = $("#project-memory");
+  return !!state._projectMemoryDirty || (ta && document.activeElement === ta);
+}
+
 async function flushProjectSystemPrompt() {
   clearTimeout(state._projectPromptTimer);
   state._projectPromptTimer = null;
@@ -496,8 +551,45 @@ function saveProjectSystemPromptSoon() {
   }, 500);
 }
 
-async function openProject(id) {
+async function flushProjectMemory() {
+  clearTimeout(state._projectMemoryTimer);
+  state._projectMemoryTimer = null;
+  if (!state._projectMemoryDirty) return;
+  const pid = state.activeProjectId;
+  const ta = $("#project-memory");
+  if (!pid || !ta) {
+    state._projectMemoryDirty = false;
+    return;
+  }
+  const next = ta.value || "";
+  state._projectMemoryDirty = false;
+  const p = await getProject(pid);
+  if (!p) return;
+  if ((p.memory || "") === next) return;
+  const saved = await saveProject({ ...p, memory: next, memory_updated_at: nowSec() });
+  const local = state.projects.find((x) => x.id === pid);
+  if (local) {
+    local.memory = next;
+    local.memory_updated_at = saved.memory_updated_at;
+  }
+  if (state.activeProjectId === pid) fillProjectMemory(saved);
+}
+
+function saveProjectMemorySoon() {
+  state._projectMemoryDirty = true;
+  clearTimeout(state._projectMemoryTimer);
+  state._projectMemoryTimer = setTimeout(() => {
+    flushProjectMemory().catch((e) => console.warn("project memory save", e));
+  }, 500);
+}
+
+async function flushProjectFields() {
   await flushProjectSystemPrompt();
+  await flushProjectMemory();
+}
+
+async function openProject(id) {
+  await flushProjectFields();
   if (state.activeProjectId === id) {
     await leaveProject();
     return;
@@ -508,7 +600,7 @@ async function openProject(id) {
 }
 
 async function leaveProject() {
-  await flushProjectSystemPrompt();
+  await flushProjectFields();
   state.activeProjectId = null;
   state.ragSelectedSources = [];
   await refreshLists();
@@ -517,7 +609,7 @@ async function leaveProject() {
 async function createProject() {
   const name = prompt("プロジェクト名", "おこた篇") || "";
   if (!name.trim()) return;
-  await flushProjectSystemPrompt();
+  await flushProjectFields();
   const p = await saveProject(emptyProject({ name: name.trim() }));
   state.activeProjectId = p.id;
   state.ragSelectedSources = [];
@@ -560,6 +652,7 @@ async function openChat(id) {
   if (!chat) return;
   state.current = chat;
   renderMessages();
+  updateComposerLock();
   await refreshLists();
   closeDrawers();
 }
@@ -587,7 +680,16 @@ async function togglePin(id) {
 
 async function removeChat(id) {
   if (!confirm("この会話を消す？端末からも消えるよ。")) return;
+  const chat = await getChat(id);
   await deleteChat(id);
+  if (chat?.project_id) {
+    const p = await getProject(chat.project_id);
+    if (p?.living_chat_id === id) {
+      const saved = await saveProject({ ...p, living_chat_id: null });
+      const local = state.projects.find((x) => x.id === saved.id);
+      if (local) local.living_chat_id = null;
+    }
+  }
   if (state.current?.id === id) state.current = null;
   await refreshLists();
   renderMessages();
@@ -598,6 +700,205 @@ async function persistCurrent() {
   state.current.updated_at = nowSec();
   state.current = await saveChat(state.current);
   scheduleDriveBackup();
+}
+
+function updateComposerLock() {
+  const archived = !!state.current?.archived;
+  const banner = $("#archive-banner");
+  if (banner) banner.hidden = !archived;
+  const send = $("#btn-send");
+  const input = $("#input");
+  if (send) send.disabled = archived || state.streaming || state.freezing;
+  if (input) input.disabled = archived;
+  const freeze = $("#btn-freeze");
+  const fold = $("#btn-fold-memory");
+  const living = !!(state.current && state.activeProjectId && !archived);
+  if (freeze) freeze.disabled = !living || state.streaming || state.freezing || state.compressing;
+  if (fold) fold.disabled = !living || state.streaming || state.freezing || state.compressing;
+}
+
+function carryBannerHtml(chat, project) {
+  if (!chat || !project || chat.archived) return "";
+  if (!isLivingThread(project, chat) && project.living_chat_id) return "";
+  const plan = planApiWindow(chat, project, {
+    autoCompress: settings().autoCompress !== false,
+    compressing: state.compressing,
+  });
+  const carryUsed = (plan.forApi || []).filter((m) => m.source === "carry");
+  if (!carryUsed.length) return "";
+  const preview = carryUsed
+    .map((m) => `${m.role === "user" ? "まろ" : "グリク"}: ${String(m.text || "").slice(0, 240)}`)
+    .join("\n\n");
+  return `<details class="carry-banner">
+    <summary>前から引き継ぎ · ${carryUsed.length}発言（APIに乗る。このスレッドのログには複製してない）</summary>
+    <pre class="carry-pre">${escapeHtml(preview)}</pre>
+  </details>`;
+}
+
+async function claimLivingIfNeeded(project, chat) {
+  if (!project || !chat || chat.archived) return project;
+  if (livingExists(project, state.projectChats) && project.living_chat_id !== chat.id) return project;
+  if (project.living_chat_id === chat.id) return project;
+  const next = await saveProject({ ...project, living_chat_id: chat.id });
+  const local = state.projects.find((x) => x.id === next.id);
+  if (local) local.living_chat_id = next.living_chat_id;
+  return next;
+}
+
+function toastFoldResult(result) {
+  if (!result) return;
+  if (result.ok && result.switched) {
+    state.settings = loadSettings();
+    syncSettingsUi();
+    toast("Geminiが検閲した。non-reasoning に切り替えて折った", "ok");
+    return;
+  }
+  if (result.ok && result.switchedFrom === "no-gemini-key") {
+    toast("Geminiキー無し。Grok で折った", "ok");
+    return;
+  }
+  if (result.ok) {
+    const who = result.provider === "gemini" ? "Gemini Lite" : "Grok NR";
+    toast(`進行メモリを更新した · ${who}`, "ok");
+    return;
+  }
+  if (result.reason === "censored") toast("圧縮が検閲で落ちた。窓は落としてない", "error");
+  else if (result.reason === "quota") toast("Gemini無料枠が尽きた。この回は折ってない", "error");
+  else if (result.reason === "no-gemini-key") toast("Geminiキーが無い。⚙ に入れるか、圧縮を Grok にしてくれ", "error");
+  else if (result.error) toast(`圧縮スキップ: ${result.error}`, "error");
+}
+
+async function runFoldOnProject(project, chat, { handoff = false } = {}) {
+  if (!project || !chat || chat.archived) return { ok: false, reason: "skip" };
+  if (!isLivingThread(project, chat) && project.living_chat_id) return { ok: false, reason: "not-living" };
+  if (state.compressing) return { ok: false, reason: "busy" };
+  if (memoryFieldBusy() && !handoff) return { ok: false, reason: "editing" };
+  await flushProjectMemory();
+  const fresh = withProjectDefaults(await getProject(project.id)) || project;
+  const plan = planApiWindow(chat, fresh, {
+    autoCompress: true,
+    compressing: false,
+  });
+  const { chunk } = foldChunkFromPlan(plan, { handoff });
+  if (!chunk.length) return { ok: false, reason: "empty" };
+  if (!handoff && plan.overflowChars < COMPRESS_BATCH_MIN) return { ok: false, reason: "small" };
+
+  state.compressing = true;
+  updateComposerLock();
+  try {
+    const result = await foldChunk(settings(), { memory: fresh.memory || "", chunk });
+    if (!result.ok) return result;
+    const updated = await saveProject(applyFold(fresh, chat, chunk, result.text));
+    const i = state.projects.findIndex((x) => x.id === updated.id);
+    if (i >= 0) state.projects[i] = updated;
+    if (state.activeProjectId === updated.id) fillProjectMemory(updated);
+    scheduleDriveBackup();
+    return { ...result, project: updated };
+  } finally {
+    state.compressing = false;
+    updateComposerLock();
+  }
+}
+
+async function maybeAutoFold(project, chat) {
+  if (settings().autoCompress === false) return;
+  if (!project || !chat) return;
+  const plan = planApiWindow(chat, project, { autoCompress: true, compressing: state.compressing });
+  if (
+    !shouldAutoFold(plan, {
+      autoCompress: true,
+      compressing: state.compressing,
+      canWrite: isLivingThread(project, chat),
+      memoryDirty: memoryFieldBusy(),
+    })
+  ) {
+    return;
+  }
+  const result = await runFoldOnProject(project, chat, { handoff: false });
+  toastFoldResult(result);
+}
+
+async function foldMemoryNow() {
+  const chat = state.current;
+  if (!chat?.project_id) {
+    toast("プロジェクトのスレッドでやってくれ", "error");
+    return;
+  }
+  if (chat.archived) {
+    toast("凍結済みには書けない", "error");
+    return;
+  }
+  await flushProjectFields();
+  let project = await getProject(chat.project_id);
+  project = await claimLivingIfNeeded(project, chat);
+  const result = await runFoldOnProject(project, chat, { handoff: true });
+  if (result.reason === "empty") toast("折る分がまだない。直近は生のまま残す", "ok");
+  else toastFoldResult(result);
+}
+
+async function freezeAndContinue() {
+  const chat = state.current;
+  if (!chat?.project_id) {
+    toast("プロジェクトのスレッドだけ凍結できる", "error");
+    return;
+  }
+  if (chat.archived) {
+    toast("もう凍結済み", "error");
+    return;
+  }
+  if (state.streaming || state.freezing) return;
+  if (!confirm("このスレッドを凍結して続きを開く。以降ここには書けない。いい？")) return;
+
+  state.freezing = true;
+  updateComposerLock();
+  try {
+    const waitStart = Date.now();
+    while (state.compressing && Date.now() - waitStart < 20000) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    await flushProjectFields();
+    let project = await getProject(chat.project_id);
+    project = await claimLivingIfNeeded(project, chat);
+    const fold = await runFoldOnProject(project, chat, { handoff: true });
+    if (fold.ok) toastFoldResult(fold);
+    else if (fold.reason !== "empty" && fold.reason !== "small") toastFoldResult(fold);
+
+    project = withProjectDefaults(await getProject(chat.project_id));
+    const plan = planApiWindow(chat, project, { autoCompress: false, compressing: false });
+    const carry = snapshotCarry(plan.window, chat.id);
+    chat.archived = true;
+    await saveChat(chat);
+
+    const next = emptyChat({
+      title: `${String(chat.title || "続き").replace(/\s*· 続き$/, "").slice(0, 28)} · 続き`,
+      system_prompt: chat.system_prompt || settings().systemPrompt,
+      model: settings().model,
+      project_id: chat.project_id,
+    });
+    const savedChat = await saveChat(next);
+    project = await saveProject({
+      ...project,
+      carry,
+      living_chat_id: savedChat.id,
+      folded_chat_id: savedChat.id,
+      folded_count: 0,
+    });
+    const i = state.projects.findIndex((x) => x.id === project.id);
+    if (i >= 0) state.projects[i] = project;
+    state.current = savedChat;
+    state.activeProjectId = project.id;
+    await refreshLists();
+    renderMessages();
+    updateComposerLock();
+    scheduleDriveBackup();
+    toast("凍結した。続きの1ターン目からメモリ＋末尾が乗る", "ok");
+    $("#input")?.focus();
+  } catch (e) {
+    toast(String(e.message || e), "error");
+  } finally {
+    state.freezing = false;
+    updateComposerLock();
+  }
 }
 
 // ── RAG sources ──────────────────────────────────────────────
@@ -686,8 +987,11 @@ function syncTitle() {
   const c = state.current;
   $("#chat-title").textContent = c?.title || "Grok Kotatsu";
   const p = state.projects.find((x) => x.id === (c?.project_id || state.activeProjectId));
-  $("#chat-sub").textContent = p ? p.name : "星の下から、続きを。";
+  let sub = p ? p.name : "星の下から、続きを。";
+  if (c?.archived) sub = p ? `${p.name} · 凍結` : "凍結済み";
+  $("#chat-sub").textContent = sub;
   document.title = `${c?.title || "Grok Kotatsu"} · Kotatsu`;
+  updateComposerLock();
 }
 
 function avatarImg(role) {
@@ -699,14 +1003,16 @@ function renderMessages({ scroll = true } = {}) {
   const box = $("#messages");
   const c = state.current;
   syncTitle();
+  const proj = state.projects.find((x) => x.id === (c?.project_id || state.activeProjectId));
+  const carryHtml = c && proj ? carryBannerHtml(c, proj) : "";
   if (!c || !(c.messages || []).length) {
-    box.innerHTML = "";
+    box.innerHTML = carryHtml;
     const empty = document.createElement("div");
     empty.id = "empty-state";
     empty.className = "empty-state";
     empty.innerHTML = `<img src="./icons/icon-192.png" width="72" height="72" alt="" class="empty-icon" />
       <h1>${c ? "最初の一言をどうぞ" : "今夜も、星の下であいてるよ"}</h1>
-      <p>${c ? "長編でも履歴はこの端末の IndexedDB に残る。" : "Grok API だけで動く長編チャット。過去ログの JSON を落とせば続きから入れる。"}</p>
+      <p>${c ? (carryHtml ? "前スレッドの末尾は上に引き継いでる。ログ.mdは貼らなくていい。" : "長編でも履歴はこの端末の IndexedDB に残る。") : "Grok API だけで動く長編チャット。過去ログの JSON を落とせば続きから入れる。"}</p>
       <div class="empty-actions">
         <button class="btn primary" type="button" data-act="new">新しいチャット</button>
         <button class="btn ghost" type="button" data-act="import">📂 JSONから再開</button>
@@ -715,13 +1021,14 @@ function renderMessages({ scroll = true } = {}) {
       ${c ? "" : `<div class="hint-row">
         <span class="chip">Streaming</span>
         <span class="chip">Projects + RAG</span>
+        <span class="chip">進行メモリ</span>
         <span class="chip">Rex Voice</span>
         <span class="chip">PWA</span>
       </div>`}`;
     box.appendChild(empty);
     return;
   }
-  box.innerHTML = c.messages
+  box.innerHTML = carryHtml + c.messages
     .map((m, i) => {
       const role = m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "system";
       if (role === "system") return "";
@@ -882,13 +1189,13 @@ function toApiContent(m, { includeImages = true } = {}) {
   return parts;
 }
 
-function buildApiMessages(chat, extraSystem) {
+function buildApiMessages(chat, extraSystem, { windowMessages } = {}) {
   const sysParts = [];
   if (chat.system_prompt) sysParts.push(chat.system_prompt);
   if (extraSystem) sysParts.push(extraSystem);
   const out = [];
   if (sysParts.length) out.push({ role: "system", content: sysParts.join("\n\n") });
-  const msgs = chat.messages || [];
+  const msgs = windowMessages || chat.messages || [];
   // 長編保護: だいたい 350k 文字で古い順に落とす
   const acc = [];
   let used = 0;
@@ -1155,7 +1462,11 @@ async function sendMessage() {
     openDrawer("right");
     return;
   }
-  if (state.streaming) return;
+  if (state.streaming || state.freezing) return;
+  if (state.current?.archived) {
+    toast("凍結済み。続きスレッドで打ってくれ", "error");
+    return;
+  }
 
   if (!state.current) {
     await createChat({ projectId: state.activeProjectId });
@@ -1190,6 +1501,10 @@ function confirmTruncate(keepThroughIndex, reason) {
 
 function startEditUser(i) {
   if (state.streaming) return;
+  if (state.current?.archived) {
+    toast("凍結済みは編集できない", "error");
+    return;
+  }
   const m = state.current?.messages?.[i];
   if (!m || m.role !== "user") return;
   state.editingIndex = i;
@@ -1240,19 +1555,36 @@ async function commitEditUser(i) {
 async function runGeneration() {
   const chat = state.current;
   if (!chat) return;
-  await flushProjectSystemPrompt();
+  if (chat.archived) {
+    toast("凍結済みのスレッドでは生成しない", "error");
+    return;
+  }
+  await flushProjectFields();
   const lastUser = [...chat.messages].reverse().find((m) => m.role === "user");
   const query = messagePlainText(lastUser || {});
 
   let extra = "";
   let ragMeta = null;
+  let windowMessages = null;
+  let foldProject = null;
   if (chat.project_id || state.activeProjectId) {
     const pid = chat.project_id || state.activeProjectId;
-    const proj = await getProject(pid);
+    let proj = await getProject(pid);
+    proj = await claimLivingIfNeeded(proj, chat);
+    foldProject = proj;
     const files = await listFiles(pid);
     const sources = getRagSourcesForSend();
     const ragEnabled = !(sources && sources.length === 0);
     if (proj?.system_prompt) extra += (extra ? "\n\n" : "") + proj.system_prompt;
+    const memBlock = memoryInjectBlock(proj?.memory || "");
+    if (memBlock) extra += (extra ? "\n\n" : "") + memBlock;
+    if (isLivingThread(proj, chat)) {
+      const plan = planApiWindow(chat, proj, {
+        autoCompress: settings().autoCompress !== false,
+        compressing: state.compressing,
+      });
+      windowMessages = plan.forApi.map((m) => m.raw || { role: m.role, content: m.text });
+    }
     if (ragEnabled && query) {
       const retrieved = retrieveFromFiles(files, query, {
         topK: settings().ragTopK,
@@ -1273,7 +1605,7 @@ async function runGeneration() {
     }
   }
 
-  const apiMessages = buildApiMessages(chat, extra);
+  const apiMessages = buildApiMessages(chat, extra, { windowMessages });
   const assistant = { role: "assistant", content: "", rag: ragMeta || undefined };
   chat.messages.push(assistant);
   renderMessages();
@@ -1324,6 +1656,12 @@ async function runGeneration() {
     await refreshLists();
     refreshCredits({ silent: true });
     if (settings().autoSpeak && assistant.content) speakAssistant(assistant.content);
+    if (foldProject && chat.project_id) {
+      const latest = await getProject(chat.project_id);
+      void maybeAutoFold(latest || foldProject, state.current || chat).catch((e) =>
+        console.warn("auto fold", e)
+      );
+    }
   } catch (e) {
     if (e.name === "AbortError") {
       assistant.content = (assistant.content || "") + (assistant.content ? "" : "（停止）");
@@ -1337,7 +1675,7 @@ async function runGeneration() {
     state.streaming = false;
     state.abort = null;
     $("#btn-stop").hidden = true;
-    $("#btn-send").disabled = false;
+    updateComposerLock();
   }
 }
 
@@ -1469,11 +1807,45 @@ function bind() {
   $("#project-system-prompt")?.addEventListener("blur", () => {
     flushProjectSystemPrompt().catch((e) => console.warn("project prompt save", e));
   });
+  $("#project-memory")?.addEventListener("input", saveProjectMemorySoon);
+  $("#project-memory")?.addEventListener("blur", () => {
+    flushProjectMemory().catch((e) => console.warn("project memory save", e));
+  });
+  $("#btn-fold-memory")?.addEventListener("click", () => {
+    foldMemoryNow().catch((e) => toast(String(e.message || e), "error"));
+  });
+  $("#btn-freeze")?.addEventListener("click", () => {
+    freezeAndContinue().catch((e) => toast(String(e.message || e), "error"));
+  });
+  const persistCompress = () => {
+    persistSettings({
+      geminiKey: sanitizeGeminiKey($("#inp-geminikey")?.value || ""),
+      compressProvider: $("#sel-compress")?.value === "xai" ? "xai" : "gemini",
+      autoCompress: $("#chk-auto-compress-settings")
+        ? $("#chk-auto-compress-settings").checked
+        : $("#chk-auto-compress")?.checked !== false,
+    });
+  };
+  $("#btn-save-gemini")?.addEventListener("click", () => {
+    persistCompress();
+    const ok = !!(settings().geminiKey || settings().compressProvider === "xai");
+    toast(ok ? "圧縮設定を保存した" : "Geminiキーが空だよ", ok ? "ok" : "error");
+  });
+  $("#inp-geminikey")?.addEventListener("blur", persistCompress);
+  $("#sel-compress")?.addEventListener("change", persistCompress);
+  $("#chk-auto-compress")?.addEventListener("change", () => {
+    persistSettings({ autoCompress: $("#chk-auto-compress").checked });
+    if ($("#chk-auto-compress-settings")) $("#chk-auto-compress-settings").checked = $("#chk-auto-compress").checked;
+  });
+  $("#chk-auto-compress-settings")?.addEventListener("change", () => {
+    persistSettings({ autoCompress: $("#chk-auto-compress-settings").checked });
+    if ($("#chk-auto-compress")) $("#chk-auto-compress").checked = $("#chk-auto-compress-settings").checked;
+  });
   $("#btn-delete-project").addEventListener("click", async () => {
     const p = state.projects.find((x) => x.id === state.activeProjectId);
     if (!p) return;
     if (!confirm(`「${p.name}」を消す？資料も消える。スレッドは全体チャット側に残る。`)) return;
-    await flushProjectSystemPrompt();
+    await flushProjectFields();
     await deleteProject(p.id);
     state.activeProjectId = null;
     state.ragSelectedSources = [];
@@ -1859,7 +2231,10 @@ function bind() {
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") persistCurrent();
+    if (document.visibilityState === "hidden") {
+      persistCurrent();
+      flushProjectFields().catch(() => {});
+    }
     if (document.visibilityState === "visible" && settings().mgmtKey) {
       refreshCredits({ silent: true });
     }
@@ -1876,6 +2251,7 @@ async function init() {
   if (oauth.handled && oauth.error) toast(`Google: ${oauth.error}`, "error");
   await refreshLists();
   renderMessages();
+  updateComposerLock();
   await refreshModels();
   if (settings().mgmtKey) refreshCredits({ silent: true });
   if (!settings().apiKey) {
