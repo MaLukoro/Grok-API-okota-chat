@@ -62,7 +62,7 @@ import {
   sanitizeClientId,
   driveSetupHelp,
   isDriveLoggedIn,
-  startGoogleLogin,
+  loginToDrive,
   uploadToDrive,
 } from "./drive.js";
 
@@ -2131,6 +2131,11 @@ function bind() {
       backupSlot: $("#inp-sb-slot").value.trim() || "kotatsu-main",
       googleClientId: sanitizeClientId($("#inp-gclient").value),
       googleAutoBackup: $("#chk-g-auto").checked,
+      geminiKey: sanitizeGeminiKey($("#inp-geminikey")?.value || ""),
+      compressProvider: $("#sel-compress")?.value === "xai" ? "xai" : "gemini",
+      autoCompress: $("#chk-auto-compress-settings")
+        ? $("#chk-auto-compress-settings").checked
+        : $("#chk-auto-compress")?.checked !== false,
     });
 
   $("#btn-g-save").addEventListener("click", () => {
@@ -2143,11 +2148,14 @@ function bind() {
       toast(String(e.message || e), "error");
     }
   });
-  $("#btn-g-login").addEventListener("click", () => {
+  $("#btn-g-login").addEventListener("click", async () => {
     saveCloudFields();
     $("#inp-gclient").value = settings().googleClientId || "";
     try {
-      startGoogleLogin(settings().googleClientId);
+      const r = await loginToDrive(settings().googleClientId);
+      if (r?.redirected) return;
+      updateDriveStatus();
+      toast("Google ログインできた", "ok");
     } catch (e) {
       toast(String(e.message || e), "error");
     }

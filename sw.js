@@ -1,8 +1,8 @@
-const CACHE = "kotatsu-v26";
+const CACHE = "kotatsu-v27";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=26",
+  "./styles.css?v=27",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -10,7 +10,7 @@ const ASSETS = [
   "./icons/favicon-64.png",
   "./icons/grik.png",
   "./icons/maro.png",
-  "./js/app.js?v=26",
+  "./js/app.js?v=27",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
@@ -42,13 +42,9 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (
-    url.pathname.startsWith("/v1") ||
-    url.pathname.startsWith("/mgmt") ||
-    url.hostname === "api.x.ai" ||
-    url.hostname === "management-api.x.ai" ||
-    url.hostname.endsWith("supabase.co")
-  ) {
+  // Drive / Gemini / Google ログインをキャッシュに入れない。同じオリジンの殻だけ。
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/v1") || url.pathname.startsWith("/mgmt")) {
     return;
   }
   const isDoc = req.mode === "navigate" || req.destination === "document";
