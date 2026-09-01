@@ -221,10 +221,11 @@ function renderCreditUi() {
   box?.classList.toggle("empty", tone === "empty");
   remainingEl.textContent = remaining == null ? "—" : formatUsd(remaining);
 
-  if (snap && (snap.purchasedUsd != null || snap.usedUsd != null)) {
+  if (snap && (snap.ledgerUsd != null || snap.purchasedUsd != null || snap.usedUsd != null)) {
     const bits = [];
-    if (snap.purchasedUsd != null) bits.push(`購入 ${formatUsd(snap.purchasedUsd)}`);
-    if (snap.usedUsd != null) bits.push(`使用 ${formatUsd(snap.usedUsd)}`);
+    const ledger = snap.ledgerUsd ?? snap.purchasedUsd;
+    if (ledger != null) bits.push(`台帳 ${formatUsd(ledger)}`);
+    if (snap.usedUsd != null) bits.push(`今月使用 ${formatUsd(snap.usedUsd)}`);
     detailEl.textContent = bits.join(" · ");
   } else {
     detailEl.textContent = "";
@@ -237,8 +238,16 @@ function renderCreditUi() {
   }
   if (creditBusy) {
     statusEl.textContent = "残高を取りにいってる…";
+  } else if (snap?.usageError) {
+    statusEl.textContent = `使用額の取得失敗（台帳のみ）: ${snap.usageError}`;
   } else if (snap?.fetchedAt) {
-    statusEl.textContent = `最終 ${new Date(snap.fetchedAt).toLocaleString("ja-JP")}${s.mgmtKey ? ` · ${maskKey(s.mgmtKey)}` : ""}`;
+    const src =
+      snap.usedSource === "usage"
+        ? " · 使用=usage"
+        : snap.usedSource === "invoice"
+          ? " · 使用=invoice"
+          : "";
+    statusEl.textContent = `最終 ${new Date(snap.fetchedAt).toLocaleString("ja-JP")}${src}${s.mgmtKey ? ` · ${maskKey(s.mgmtKey)}` : ""}`;
   } else {
     statusEl.textContent = "まだ取ってない。下の「残量を更新」";
   }
@@ -288,7 +297,11 @@ async function refreshCredits({ force = false, silent = false, fromUi = false } 
       creditSnapshot: {
         remainingUsd: snap.remainingUsd,
         purchasedUsd: snap.purchasedUsd,
+        ledgerUsd: snap.ledgerUsd,
         usedUsd: snap.usedUsd,
+        usedSource: snap.usedSource,
+        billingCycle: snap.billingCycle || null,
+        usageError: snap.usageError || null,
         teamId: snap.teamId,
         fetchedAt: snap.fetchedAt,
       },
@@ -1322,7 +1335,7 @@ async function runGeneration() {
     await persistCurrent();
     renderMessages();
     await refreshLists();
-    refreshCredits({ silent: true });
+    refreshCredits({ force: true, silent: true });
     if (settings().autoSpeak && assistant.content) speakAssistant(assistant.content);
   } catch (e) {
     if (e.name === "AbortError") {

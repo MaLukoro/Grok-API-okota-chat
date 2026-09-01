@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=25" />
+  <link rel="stylesheet" href="./styles.css?v=26" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -166,7 +166,7 @@
         <div class="composer-meta">
           <span id="gen-hint"></span>
           <span id="rag-hint" class="rag-hint" hidden></span>
-          <button type="button" id="credit-chip" class="credit-chip" hidden title="購入済みクレジット残量。タップで設定へ">残 —</button>
+          <button type="button" id="credit-chip" class="credit-chip" hidden title="クレジット残量（ライブ推定）。タップで設定へ">残 —</button>
         </div>
       </footer>
     </main>
@@ -202,7 +202,7 @@
           <input id="inp-teamid" type="text" autocomplete="off" spellcheck="false" placeholder="空なら Management Key から取る" />
         </label>
         <div class="credit-box" id="credit-box">
-          <div class="credit-box-label">購入済みクレジット残量</div>
+          <div class="credit-box-label">クレジット残量（ライブ推定）</div>
           <div class="credit-remaining" id="credit-remaining">—</div>
           <div class="credit-detail" id="credit-detail"></div>
           <div class="credit-status muted sm" id="credit-status">Management Key を入れると残量が出る</div>
@@ -210,7 +210,7 @@
         <div class="row-btns">
           <button id="btn-credit" class="btn ghost sm" type="button">残量を更新</button>
         </div>
-        <p class="help">チャット用 APIキーでは残高は見えない。console.x.ai → Settings → Management Keys で、Billing が読めるキーを発行してくれ。</p>
+        <p class="help">チャット用 APIキーでは残高は見えない。console.x.ai → Settings → Management Keys で、Billing が読めるキーを発行してくれ。台帳は締め後の数字で、今月の使用は usage API から引いてライブ残を出してる。</p>
         <details class="sql-help">
           <summary>残高が弾かれたとき（中継＝Worker）</summary>
           <p class="help">チャット用のサーバーはブラウザ直OK。残高サーバーだけ拒否する。中継は Cloudflare が無料で貸す小さいプログラムで、名前が Worker。チャットには不要。</p>
@@ -364,7 +364,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=25"></script>
+  <script type="module" src="./js/app.js?v=26"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -374,7 +374,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=25").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=26").catch(() => {});
       });
     }
   </script>

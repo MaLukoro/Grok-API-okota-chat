@@ -279,11 +279,13 @@ function mgmtAuthHeaders(settings) {
   };
 }
 
-async function mgmtFetchJson(settings, path) {
+async function mgmtFetchJson(settings, path, { method = "GET", body = null } = {}) {
   const url = `${resolveMgmtBase(settings)}${path.startsWith("/") ? path : `/${path}`}`;
   let res;
   try {
-    res = await fetch(url, { headers: mgmtAuthHeaders(settings) });
+    const init = { method, headers: mgmtAuthHeaders(settings) };
+    if (body != null) init.body = JSON.stringify(body);
+    res = await fetch(url, init);
   } catch (e) {
     if (resolveMgmtBase(settings) === MGMT_DIRECT) {
       throw new Error(
@@ -325,24 +327,119 @@ export function formatUsd(n) {
   });
 }
 
-export function parseCreditSnapshot(balance, invoice) {
-  const totalAbs = usdAbsFromCents(balance?.total);
-  const prepaidAbs = usdAbsFromCents(invoice?.coreInvoice?.prepaidCredits);
-  const usedUsd = usdAbsFromCents(invoice?.coreInvoice?.prepaidCreditsUsed) ?? 0;
+/** invoice.billingCycle が無ければ UTC の今月。年が明らかにズレてても今月へ。 */
+export function resolveBillingCycle(cycle) {
+  const now = new Date();
+  const nowY = now.getUTCFullYear();
+  const nowM = now.getUTCMonth() + 1;
+  let year = Number(cycle?.year);
+  let month = Number(cycle?.month);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return { year: nowY, month: nowM };
+  }
+  if (Math.abs(year - nowY) > 1) {
+    return { year: nowY, month: nowM };
+  }
+  return { year, month };
+}
 
-  const split = (pool) => {
-    if (pool == null) return null;
-    // pool が購入合計なら used を引く。すでに残量なら引かない。
-    if (usedUsd > 0.0001 && pool + 0.005 >= usedUsd) {
-      return { purchasedUsd: pool, remainingUsd: pool - usedUsd };
+function cycleTimeRange({ year, month }) {
+  const start = `${year}-${String(month).padStart(2, "0")}-01 00:00:00`;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const end = `${nextYear}-${String(nextMonth).padStart(2, "0")}-01 00:00:00`;
+  return { startTime: start, endTime: end, timezone: "Etc/GMT" };
+}
+
+function sumUsageUsd(payload) {
+  let sum = 0;
+  for (const series of payload?.timeSeries || []) {
+    for (const dp of series.dataPoints || []) {
+      for (const v of dp.values || []) {
+        const n = Number(v);
+        if (Number.isFinite(n)) sum += n;
+      }
     }
-    return {
-      remainingUsd: pool,
-      purchasedUsd: usedUsd > 0 ? pool + usedUsd : pool,
-    };
-  };
+  }
+  return sum;
+}
 
-  return { usedUsd, ...(split(totalAbs) || split(prepaidAbs) || { purchasedUsd: null, remainingUsd: null }) };
+/** 台帳に既に載ってる今サイクルの SPEND（USD）。二重引き防止用。 */
+function postedSpendUsdForCycle(balance, { year, month }) {
+  let sum = 0;
+  for (const ch of balance?.changes || []) {
+    if (String(ch.changeOrigin || "") !== "SPEND") continue;
+    if (Number(ch.spendBpKeyYear) !== year || Number(ch.spendBpKeyMonth) !== month) continue;
+    const n = usdAbsFromCents(ch.amount);
+    if (n != null) sum += n;
+  }
+  return sum;
+}
+
+/**
+ * ライブ残の計算。
+ * prepaid/balance.total は締め後台帳で、サイクル途中の消費が遅れて載る。
+ * postpaid invoice の prepaidCreditsUsed は prepaid 専用アカウントだと 0 のまま。
+ * なので usage API の今サイクル USD を使い、未反映分だけ台帳から引く。
+ */
+export function parseCreditSnapshot(balance, invoice, cycleUsageUsd = null) {
+  const ledgerUsd = usdAbsFromCents(balance?.total) ?? usdAbsFromCents(invoice?.coreInvoice?.prepaidCredits);
+  const invoiceUsed = usdAbsFromCents(invoice?.coreInvoice?.prepaidCreditsUsed) ?? 0;
+  const cycle = resolveBillingCycle(invoice?.billingCycle);
+  const postedSpend = postedSpendUsdForCycle(balance, cycle);
+
+  let usedUsd = 0;
+  let usedSource = "none";
+  if (invoiceUsed > 0.0001) {
+    usedUsd = invoiceUsed;
+    usedSource = "invoice";
+  } else if (cycleUsageUsd != null && Number.isFinite(cycleUsageUsd)) {
+    usedUsd = Math.max(0, cycleUsageUsd);
+    usedSource = "usage";
+  }
+
+  const unpostedUsd = Math.max(0, usedUsd - postedSpend);
+  const remainingUsd = ledgerUsd == null ? null : Math.max(0, ledgerUsd - unpostedUsd);
+
+  return {
+    usedUsd,
+    remainingUsd,
+    // 互換: 古い UI が purchasedUsd を読む。中身は台帳残（新規購入額ではない）
+    purchasedUsd: ledgerUsd,
+    ledgerUsd,
+    usedSource,
+    billingCycle: cycle,
+  };
+}
+
+async function fetchCycleUsageUsd(settings, teamId, cycle) {
+  const timeRange = cycleTimeRange(cycle);
+  const path = `/v1/billing/teams/${encodeURIComponent(teamId)}/usage`;
+  const attempts = [
+    { timeUnit: "TIME_UNIT_NONE", groupBy: [] },
+    { timeUnit: "TIME_UNIT_DAY", groupBy: ["description"] },
+  ];
+  let lastErr = null;
+  for (const opt of attempts) {
+    try {
+      const data = await mgmtFetchJson(settings, path, {
+        method: "POST",
+        body: {
+          analyticsRequest: {
+            timeRange,
+            timeUnit: opt.timeUnit,
+            values: [{ name: "usd", aggregation: "AGGREGATION_SUM" }],
+            groupBy: opt.groupBy,
+            filters: [],
+          },
+        },
+      });
+      return sumUsageUsd(data);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("usage API から使用額が取れなかった");
 }
 
 export async function validateMgmtKey(settings) {
@@ -386,9 +483,29 @@ export async function fetchCreditBalance(settings) {
     }
   }
 
-  const snap = parseCreditSnapshot(balance, invoice);
+  const cycle = resolveBillingCycle(invoice?.billingCycle);
+  const invoiceUsed = usdAbsFromCents(invoice?.coreInvoice?.prepaidCreditsUsed) ?? 0;
+  let cycleUsageUsd = null;
+  let usageError = null;
+  // invoice の使用額が 0 のときだけ usage API を叩く（prepaid 専用対策）
+  if (invoiceUsed <= 0.0001) {
+    try {
+      cycleUsageUsd = await fetchCycleUsageUsd(settings, teamId, cycle);
+    } catch (e) {
+      usageError = String(e.message || e);
+      console.warn("credit usage fetch failed", e);
+    }
+  }
+
+  const snap = parseCreditSnapshot(balance, invoice, cycleUsageUsd);
   if (snap.remainingUsd == null && snap.purchasedUsd == null) {
     throw new Error("残高の数字がレスポンスから読めなかった");
   }
-  return { ...snap, teamId, teamIdDetected: detected, fetchedAt: Date.now() };
+  return {
+    ...snap,
+    teamId,
+    teamIdDetected: detected,
+    fetchedAt: Date.now(),
+    usageError,
+  };
 }
