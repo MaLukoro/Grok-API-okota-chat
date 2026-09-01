@@ -2252,7 +2252,12 @@ function bind() {
 
 async function init() {
   setupViewport();
-  const oauth = consumeOAuthRedirect();
+  let oauth = { handled: false };
+  try {
+    oauth = await consumeOAuthRedirect();
+  } catch (e) {
+    oauth = { handled: true, error: String(e.message || e) };
+  }
   syncSettingsUi();
   bind();
   if (oauth.handled && oauth.ok) toast("Google ログインできた", "ok");

@@ -1,8 +1,8 @@
-const CACHE = "kotatsu-v27";
+const CACHE = "kotatsu-v28";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=27",
+  "./styles.css?v=28",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -10,7 +10,7 @@ const ASSETS = [
   "./icons/favicon-64.png",
   "./icons/grik.png",
   "./icons/maro.png",
-  "./js/app.js?v=27",
+  "./js/app.js?v=28",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
@@ -48,8 +48,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   const isDoc = req.mode === "navigate" || req.destination === "document";
+  // Google から ?code= / #access_token で戻る文書はキャッシュしない
+  if (isDoc) {
+    event.respondWith(
+      fetch(req, { cache: "reload" }).catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
   event.respondWith(
-    fetch(req, isDoc ? { cache: "reload" } : undefined)
+    fetch(req)
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
