@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=30" />
+  <link rel="stylesheet" href="./styles.css?v=31" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -311,7 +311,7 @@
           <input id="chk-auto-compress" type="checkbox" />
           <span>自動圧縮する（オフなら凍結したときだけ溶かす）</span>
         </label>
-        <p class="help">本体の返答は今どおり Grok。圧縮は窓から落ちた一塊だけ。Geminiキーが空、または検閲されたら Grok に落とす。Worker を使ってるなら worker.js を最新に貼ると Gemini 中継も通る。</p>
+        <p class="help">本体の返答は今どおり Grok。圧縮は窓から落ちた一塊だけ。Geminiキーが空、または検閲されたら Grok に落とす。保存すると、Googleログイン中ならドライブにも乗る。Worker を使ってるなら worker.js を最新に貼ると Gemini 中継も通る。</p>
       </div>
 
       <div class="panel">
@@ -345,7 +345,7 @@
 
       <div class="panel">
         <div class="panel-title">Google ドライブ</div>
-        <p class="help">会話の作業場は端末。ドライブはコピー先。⬆ すると APIキー・Management Key・プロキシも一緒に乗る。チャットに貼った画像の中身（base64）は乗せない。別端末は Google ログインして ⬇。</p>
+        <p class="help">会話の作業場は端末。ドライブはコピー先。⬆ すると APIキー・Management Key・Geminiキー・プロキシも一緒に乗る。チャットに貼った画像の中身（base64）は乗せない。別端末は Google ログインして ⬇。</p>
         <label class="field">
           <span>OAuth クライアントID</span>
           <input id="inp-gclient" type="text" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com" />
@@ -403,7 +403,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=30"></script>
+  <script type="module" src="./js/app.js?v=31"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -413,7 +413,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=30").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=31").catch(() => {});
       });
     }
   </script>

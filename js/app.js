@@ -185,18 +185,19 @@ function updateDriveStatus() {
 }
 
 let driveBackupTimer = null;
-function scheduleDriveBackup() {
-  if (!settings().googleAutoBackup) return;
+function scheduleDriveBackup({ force = false } = {}) {
   if (!isDriveLoggedIn()) return;
+  if (!force && !settings().googleAutoBackup) return;
   clearTimeout(driveBackupTimer);
   driveBackupTimer = setTimeout(async () => {
     try {
       await uploadToDrive(settings());
       persistSettings({ googleLastBackup: new Date().toISOString() });
     } catch (e) {
-      console.warn("auto drive backup", e);
+      if (force) toast(`ドライブへ上げられなかった: ${e.message || e}`, "error");
+      else console.warn("auto drive backup", e);
     }
-  }, 8000);
+  }, force ? 400 : 8000);
 }
 
 function fillVoiceSelect() {
@@ -604,6 +605,7 @@ async function flushProjectMemory() {
   const local = state.projects.find((x) => x.id === pid);
   if (local) local.progress_memory = next;
   if (state.activeProjectId === pid) fillProjectMemory({ ...p, progress_memory: next });
+  scheduleDriveBackup();
 }
 
 function saveProjectMemorySoon() {
@@ -1646,6 +1648,7 @@ async function applyCompressedMemory({ chat, project, chunk, text }) {
   }
   if (state.current?.id === savedC.id) state.current = savedC;
   fillProjectMemory(savedP);
+  scheduleDriveBackup();
   return { project: savedP, chat: savedC, memory: nextMem };
 }
 
@@ -2221,7 +2224,14 @@ function bind() {
     const geminiApiKey = sanitizeGeminiKey($("#inp-geminikey")?.value || "");
     persistSettings({ geminiApiKey });
     if ($("#inp-geminikey")) $("#inp-geminikey").value = geminiApiKey;
-    toast(geminiApiKey ? "Geminiキー保存した" : "Geminiキーを消した", geminiApiKey ? "ok" : "error");
+    if (!geminiApiKey) {
+      toast("Geminiキーを消した", "error");
+    } else if (isDriveLoggedIn()) {
+      toast("Geminiキー保存した。ドライブにも上げる", "ok");
+    } else {
+      toast("Geminiキー保存した。別端末なら Google ログインして ⬆", "ok");
+    }
+    scheduleDriveBackup({ force: true });
   });
   $("#sel-compress-engine")?.addEventListener("change", () => {
     persistSettings({ compressEngine: $("#sel-compress-engine").value === "grok" ? "grok" : "gemini" });
