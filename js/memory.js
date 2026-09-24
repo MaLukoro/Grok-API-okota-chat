@@ -3,23 +3,27 @@
 import { contentAsText } from "./util.js";
 
 export const WINDOW_CHARS = 10000;
-export const MEMORY_CAP = 4000;
+export const MEMORY_CAP = 2500;
 export const OVERFLOW_MIN = 3500;
 export const CHUNK_CHARS = 8000;
 export const HANDOFF_CHUNK = 12000;
 
 export const MEMORY_FORM = `場所:
 時刻:
+服装:
+身体・接触:
+感情・温度:
 未解決（約束・仕掛り）:
-起きた出来事:
 今ターンで変えた事実:
 固有名詞:`;
 
 const FORM_LABELS = [
   "場所:",
   "時刻:",
+  "服装:",
+  "身体・接触:",
+  "感情・温度:",
   "未解決",
-  "起きた出来事:",
   "今ターンで変えた事実:",
   "固有名詞:",
 ];
@@ -148,30 +152,9 @@ export function remainingHandoff(project) {
   return (project?.handoff?.messages || []).filter((m) => !m.folded && (m.role === "user" || m.role === "assistant"));
 }
 
-const EVENT_LABEL = "起きた出来事:";
-const EVENT_NEXT = /\n(今ターンで変えた事実:|固有名詞:|服装:|身体・接触:|感情・温度:)/;
-
-/** 溢れは出来事の古い行から落とす。末尾の事実・固有名詞は切らない。 */
 export function capMemory(text, cap = MEMORY_CAP) {
-  let s = String(text || "").trim();
+  const s = String(text || "").trim();
   if (s.length <= cap) return s;
-  const idx = s.indexOf(EVENT_LABEL);
-  if (idx >= 0) {
-    const start = idx + EVENT_LABEL.length;
-    const rest = s.slice(start);
-    const m = rest.match(EVENT_NEXT);
-    const bodyEnd = m ? start + m.index : s.length;
-    const head = s.slice(0, start);
-    const tail = s.slice(bodyEnd);
-    const lines = s.slice(start, bodyEnd).split("\n");
-    while (head.length + lines.join("\n").length + tail.length > cap) {
-      const i = lines.findIndex((l) => l.trim());
-      if (i < 0) break;
-      lines.splice(i, 1);
-    }
-    s = (head + lines.join("\n") + tail).trim();
-    if (s.length <= cap) return s;
-  }
   const cut = s.slice(0, cap);
   const nl = cut.lastIndexOf("\n");
   return (nl > cap * 0.6 ? cut.slice(0, nl) : cut).trim();
@@ -184,8 +167,6 @@ export function looksLikeForm(text) {
   for (const lab of FORM_LABELS) {
     if (s.includes(lab)) hits += 1;
   }
-  // 旧フォーム（服装・身体・感情）も、次の圧縮まで通す
-  if (s.includes("服装:") || s.includes("身体・接触:") || s.includes("感情・温度:")) hits += 1;
   return hits >= 4;
 }
 
@@ -216,13 +197,9 @@ export function buildCompressPrompt({ memory, chunkText, cap = MEMORY_CAP }) {
 ルール:
 - 出力はフォームだけ。前置き・後書き・コードフェンス・セリフの引用は禁止
 - 今の進行メモリを前状態として残し、新しい事実で上書きする
-- ユーザーが手で書いた行は落とさない（ピン）。ただし服装・身体・接触・感情・温度はピン対象外
-- 服装・身体・接触・感情・温度は直近の生ログで足りる。メモリに残すな。前メモリにあってもコピーするな。窓が閉じたあとも効く持続変化（怪我・拘束・壊れた服など）だけ「今ターンで変えた事実」か「未解決」へ一行
-- 「起きた出来事」は箇条書き。1件は「誰が何をした」を核にする。短くていいが、必要ならその場の温度感（空気・感情・身体の調子）を同じ項目に足してよい。毎件につけるな。情景の全文やセリフの引用はするな
-- 前メモリの箇条書きは残して末尾に追加する。行をまとめるな。言い換えるな。削るな。同じ出来事の重複だけ書かない
-- 字数は出来事の件数を優先。温度感で件数を減らすな。場所・時刻・未解決・事実・固有名詞は短く保つ
-- 場所・時刻・未解決は具体的に残す
-- ${cap}字以内。超えそうなら出来事のいちばん古い行から削る。新しい行と未解決は落とすな
+- ユーザーが手で書いた行は落とさない（ピン）
+- 場所・服装・身体・接触・未解決は具体的に残す。ぼかさない
+- ${cap}字以内。超えるなら確定事実側を圧縮
 - 刺激的な描写も事実として残す。検閲しない
 
 フォーム:

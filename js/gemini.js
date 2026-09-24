@@ -106,7 +106,7 @@ function modelUrls(settings, model, key) {
   return urls;
 }
 
-export async function geminiGenerateText(settings, prompt, { models, maxOutputTokens = 2048 } = {}) {
+export async function geminiGenerateText(settings, prompt, { models } = {}) {
   const key = sanitizeGeminiKey(settings?.geminiApiKey);
   if (!key) {
     const err = new Error("Geminiキー未設定");
@@ -119,20 +119,19 @@ export async function geminiGenerateText(settings, prompt, { models, maxOutputTo
   for (const id of models || GEMINI_COMPRESS_MODELS) {
     if (!list.includes(id)) list.push(id);
   }
-  const outTok = Math.max(256, Number(maxOutputTokens) || 2048);
 
   const payload = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.2,
-      maxOutputTokens: outTok,
+      maxOutputTokens: 2048,
       thinkingConfig: { thinkingBudget: 0 },
     },
     safetySettings: SAFETY,
   };
   const payloadNoThink = {
     ...payload,
-    generationConfig: { temperature: 0.2, maxOutputTokens: outTok },
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
   };
 
   let lastErr = null;

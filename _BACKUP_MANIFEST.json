@@ -1,0 +1,20 @@
+{
+  "name": "grok-kotatsu_2026-09-02_0919",
+  "created_at": "2026-09-02T09:19:00",
+  "overwritten": false,
+  "source": "C:\\Users\\kyuri\\Desktop\\grok-kotatsu",
+  "destination": "C:\\GrokLog\\Grok Build\\Okota app backup\\grok-kotatsu_2026-09-02_0919",
+  "reason": "Day close: project memory v=30 + Gemini key Drive sync v=31 (user verified)",
+  "frontend_cache": "?v=31 / kotatsu-v31",
+  "file_count": 87,
+  "size_mb": 12.41,
+  "exclude": ["__pycache__", ".git", "*.pyc", ".env"],
+  "highlights": [
+    "SESSION_LOG_2026-09-02_メモリ実装.md complete",
+    "?v=30 recent-N window + structured overwrite memory + freeze-and-continue",
+    "?v=31 Gemini API key saves to Drive when logged in",
+    "user verified: Gemini compress on live thread, PWA restored key",
+    "Drive/OAuth untouched",
+    "RP behavior check still pending"
+  ]
+}

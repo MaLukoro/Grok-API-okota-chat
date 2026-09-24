@@ -1,8 +1,8 @@
-const CACHE = "kotatsu-v34";
+const CACHE = "kotatsu-v31";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=34",
+  "./styles.css?v=31",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -10,7 +10,7 @@ const ASSETS = [
   "./icons/favicon-64.png",
   "./icons/grik.png",
   "./icons/maro.png",
-  "./js/app.js?v=34",
+  "./js/app.js?v=31",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
@@ -20,8 +20,8 @@ const ASSETS = [
   "./js/tts.js",
   "./js/cloud.js",
   "./js/drive.js",
-  "./js/memory.js?v=34",
-  "./js/gemini.js?v=33",
+  "./js/memory.js?v=30",
+  "./js/gemini.js?v=30",
 ];
 
 self.addEventListener("install", (event) => {

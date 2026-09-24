@@ -60,8 +60,8 @@ import {
   splitWindow,
   stripFences,
   windowStats,
-} from "./memory.js?v=34";
-import { geminiGenerateText, isGeminiSafetyError, sanitizeGeminiKey } from "./gemini.js?v=33";
+} from "./memory.js?v=30";
+import { geminiGenerateText, isGeminiSafetyError, sanitizeGeminiKey } from "./gemini.js?v=30";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
@@ -1598,7 +1598,7 @@ async function compressText(prompt) {
   let lastErr = null;
   if (engine === "gemini") {
     try {
-      const r = await geminiGenerateText(s, prompt, { maxOutputTokens: 4096 });
+      const r = await geminiGenerateText(s, prompt);
       if (r?.model && r.model !== s.geminiCompressModel) persistSettings({ geminiCompressModel: r.model });
       return { text: r.text, used: "gemini", model: r.model };
     } catch (e) {
@@ -1618,7 +1618,7 @@ async function compressText(prompt) {
       { role: "user", content: prompt },
     ],
     temperature: 0.2,
-    maxTokens: 4096,
+    maxTokens: 2048,
   });
   return { text: grok.content || "", used: "grok", model: grok.model, priorError: lastErr };
 }
