@@ -9,18 +9,18 @@ function hostHasLocalProxy() {
 }
 
 export const GEMINI_COMPRESS_MODELS = [
-  "gemini-2.5-flash-lite",
-  "gemini-3.5-flash-lite",
   "gemini-3.1-flash-lite",
+  "gemini-3.5-flash-lite",
+  "gemini-2.5-flash-lite",
   "gemini-2.0-flash-lite",
 ];
 
+// CIVIC_INTEGRITY は廃止済み。載せると 3.x が 400 を返す。
 const SAFETY = [
   "HARM_CATEGORY_HARASSMENT",
   "HARM_CATEGORY_HATE_SPEECH",
   "HARM_CATEGORY_SEXUALLY_EXPLICIT",
   "HARM_CATEGORY_DANGEROUS_CONTENT",
-  "HARM_CATEGORY_CIVIC_INTEGRITY",
 ].map((category) => ({ category, threshold: "BLOCK_NONE" }));
 
 export function sanitizeGeminiKey(raw) {
@@ -34,7 +34,8 @@ export function isGeminiSafetyError(err) {
   if (!err) return false;
   if (err.code === "SAFETY") return true;
   const m = String(err.message || err);
-  return /blocked|SAFETY|PROHIBITED|BLOCKLIST|finishReason/i.test(m);
+  if (/safetySettings|harm_category|civic/i.test(m)) return false;
+  return /blocked|PROHIBITED|BLOCKLIST|finishReason|\bSAFETY\b/i.test(m);
 }
 
 function geminiProxyBase(settings) {
@@ -62,8 +63,35 @@ function extractText(json) {
     throw err;
   }
   const parts = c?.content?.parts || [];
-  const text = parts.map((p) => (typeof p?.text === "string" ? p.text : "")).join("");
+  const text = parts
+    .map((p) => (p?.thought ? "" : typeof p?.text === "string" ? p.text : ""))
+    .join("");
   return text.trim();
+}
+
+function isGemini3(model) {
+  return /gemini-3(?:\.|\b)/.test(String(model || ""));
+}
+
+/** 3.x に thinkingBudget: 0 を渡すと 400。レベルは minimal。2.5 は考えないのが既定。 */
+function generationConfigs(model, maxOutputTokens) {
+  const bare = { temperature: 0.2, maxOutputTokens };
+  if (isGemini3(model)) {
+    return [{ ...bare, thinkingConfig: { thinkingLevel: "minimal" } }, bare];
+  }
+  return [bare, { ...bare, thinkingConfig: { thinkingBudget: 0 } }];
+}
+
+function isNotFound(err) {
+  return err?.status === 404 || /not found|NOT_FOUND/i.test(String(err?.message || ""));
+}
+
+function isThinkingReject(err) {
+  return /thinking/i.test(String(err?.message || ""));
+}
+
+function isSafetySettingReject(err) {
+  return /safetySettings|harm_category|civic|threshold/i.test(String(err?.message || ""));
 }
 
 async function readError(res) {
@@ -80,7 +108,10 @@ async function readError(res) {
   }
   const err = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   err.status = res.status;
-  if (/safety|blocked|prohibited/i.test(String(detail))) err.code = "SAFETY";
+  const msg = String(detail);
+  if (!/safetySettings|harm_category|civic|threshold/i.test(msg) && /blocked|prohibited/i.test(msg)) {
+    err.code = "SAFETY";
+  }
   return err;
 }
 
@@ -106,7 +137,7 @@ function modelUrls(settings, model, key) {
   return urls;
 }
 
-export async function geminiGenerateText(settings, prompt, { models } = {}) {
+export async function geminiGenerateText(settings, prompt, { models, maxOutputTokens = 2048 } = {}) {
   const key = sanitizeGeminiKey(settings?.geminiApiKey);
   if (!key) {
     const err = new Error("Geminiキー未設定");
@@ -119,41 +150,61 @@ export async function geminiGenerateText(settings, prompt, { models } = {}) {
   for (const id of models || GEMINI_COMPRESS_MODELS) {
     if (!list.includes(id)) list.push(id);
   }
-
-  const payload = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 2048,
-      thinkingConfig: { thinkingBudget: 0 },
-    },
-    safetySettings: SAFETY,
-  };
-  const payloadNoThink = {
-    ...payload,
-    generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-  };
+  const outTok = Math.max(256, Number(maxOutputTokens) || 2048);
 
   let lastErr = null;
   for (const model of list) {
     const urls = modelUrls(settings, model, key);
+    const configs = generationConfigs(model, outTok);
+    let skipModel = false;
     for (const url of urls) {
-      for (const body of [payload, payloadNoThink]) {
-        try {
-          const json = await postGenerate(url, key, body);
-          const text = extractText(json);
-          if (!text) {
-            lastErr = new Error("Geminiの出力が空");
-            continue;
+      if (skipModel) break;
+      for (const generationConfig of configs) {
+        const withSafety = {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig,
+          safetySettings: SAFETY,
+        };
+        const bareSafety = {
+          contents: withSafety.contents,
+          generationConfig,
+        };
+        const bodies = [withSafety];
+        for (let bi = 0; bi < bodies.length; bi++) {
+          try {
+            let json;
+            try {
+              json = await postGenerate(url, key, bodies[bi]);
+            } catch (e) {
+              if ((e.status === 503 || e.status === 429) && !e.retried) {
+                await new Promise((r) => setTimeout(r, 500));
+                json = await postGenerate(url, key, bodies[bi]);
+              } else {
+                throw e;
+              }
+            }
+            const text = extractText(json);
+            if (!text) {
+              lastErr = new Error(`${model}: Geminiの出力が空`);
+              continue;
+            }
+            return { text, model };
+          } catch (e) {
+            lastErr = e;
+            if (e.code === "SAFETY") throw e;
+            if (isNotFound(e)) {
+              skipModel = true;
+              break;
+            }
+            if (e.status === 400 && isSafetySettingReject(e) && bodies[bi].safetySettings) {
+              bodies.push(bareSafety);
+              continue;
+            }
+            if (e.status === 400 && isThinkingReject(e)) continue;
+            break;
           }
-          return { text, model };
-        } catch (e) {
-          lastErr = e;
-          if (e.status === 404 || /not found|NOT_FOUND/i.test(String(e.message || ""))) break;
-          if (e.code === "SAFETY") throw e;
-          if (/thinkingConfig|Unknown name/i.test(String(e.message || ""))) continue;
-          break;
         }
+        if (skipModel) break;
       }
     }
   }

@@ -1,0 +1,9 @@
+.DS_Store
+Thumbs.db
+*.pyc
+__pycache__/
+.env
+.wrangler/
+node_modules/
+dist/
+.vscode/

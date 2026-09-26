@@ -60,8 +60,8 @@ import {
   splitWindow,
   stripFences,
   windowStats,
-} from "./memory.js?v=30";
-import { geminiGenerateText, isGeminiSafetyError, sanitizeGeminiKey } from "./gemini.js?v=30";
+} from "./memory.js?v=34";
+import { geminiGenerateText, isGeminiSafetyError, sanitizeGeminiKey } from "./gemini.js?v=35";
 import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
 import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
@@ -1592,15 +1592,32 @@ function scheduleCompress(chatId, projectId) {
   maybeCompress({ chatId, projectId, reason: "auto" }).catch((e) => console.warn("compress", e));
 }
 
+function shortErr(e) {
+  const msg = String(e?.message || e || "").replace(/\s+/g, " ").trim();
+  if (!msg) return "";
+  return msg.length > 80 ? `${msg.slice(0, 80)}…` : msg;
+}
+
 async function compressText(prompt) {
   const s = settings();
   const engine = s.compressEngine === "grok" ? "grok" : "gemini";
   let lastErr = null;
   if (engine === "gemini") {
     try {
-      const r = await geminiGenerateText(s, prompt);
+      const r = await geminiGenerateText(s, prompt, { maxOutputTokens: 4096 });
+      const text = stripFences(r.text);
+      if (looksLikeRefusal(text)) {
+        const err = new Error("Geminiが文章を拒否した");
+        err.code = "SAFETY";
+        throw err;
+      }
+      if (!looksLikeForm(text)) {
+        const err = new Error("Geminiの出力がフォームじゃない");
+        err.code = "COLLAPSE";
+        throw err;
+      }
       if (r?.model && r.model !== s.geminiCompressModel) persistSettings({ geminiCompressModel: r.model });
-      return { text: r.text, used: "gemini", model: r.model };
+      return { text, used: "gemini", model: r.model };
     } catch (e) {
       lastErr = e;
       if (isGeminiSafetyError(e)) {
@@ -1611,16 +1628,21 @@ async function compressText(prompt) {
       }
     }
   }
-  const grok = await chatComplete(s, {
-    model: "grok-4.20-0309-non-reasoning",
-    messages: [
-      { role: "system", content: "進行メモリのフォームだけを出力する。前置き禁止。" },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.2,
-    maxTokens: 2048,
-  });
-  return { text: grok.content || "", used: "grok", model: grok.model, priorError: lastErr };
+  try {
+    const grok = await chatComplete(s, {
+      model: "grok-4.20-0309-non-reasoning",
+      messages: [
+        { role: "system", content: "進行メモリのフォームだけを出力する。前置き禁止。" },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+      maxTokens: 4096,
+    });
+    return { text: grok.content || "", used: "grok", model: grok.model, priorError: lastErr };
+  } catch (e) {
+    e.priorError = lastErr;
+    throw e;
+  }
 }
 
 async function applyCompressedMemory({ chat, project, chunk, text }) {
@@ -1687,7 +1709,13 @@ async function maybeCompress({ chatId, projectId, reason = "auto", forceChunk = 
       cap: MEMORY_CAP,
     });
     const result = await compressText(prompt);
-    const applied = await applyCompressedMemory({ chat, project, chunk: pick, text: result.text });
+    let applied;
+    try {
+      applied = await applyCompressedMemory({ chat, project, chunk: pick, text: result.text });
+    } catch (e) {
+      if (result?.priorError) e.priorError = result.priorError;
+      throw e;
+    }
     if (reason === "auto") {
       updateMemoryHint();
     } else {
@@ -1699,7 +1727,8 @@ async function maybeCompress({ chatId, projectId, reason = "auto", forceChunk = 
   } catch (e) {
     if (e.code === "BUSY") return { skipped: "editing" };
     console.warn("compress failed", e);
-    toast("圧縮は落ちた。この回は生ログのまま", "error");
+    const why = [shortErr(e.priorError), shortErr(e)].filter((v, i, a) => v && a.indexOf(v) === i).join(" / ");
+    toast(why ? `圧縮は落ちた。${why}` : "圧縮は落ちた。この回は生ログのまま", "error");
     return { failed: true, error: e };
   } finally {
     state.compressing = false;

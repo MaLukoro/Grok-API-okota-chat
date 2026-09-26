@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=31" />
+  <link rel="stylesheet" href="./styles.css?v=34" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -83,7 +83,7 @@
           <textarea
             id="project-progress-memory"
             rows="8"
-            placeholder="場所:&#10;時刻:&#10;服装:&#10;身体・接触:&#10;感情・温度:&#10;未解決（約束・仕掛り）:&#10;今ターンで変えた事実:&#10;固有名詞:"
+            placeholder="場所:&#10;時刻:&#10;未解決（約束・仕掛り）:&#10;起きた出来事:&#10;- &#10;今ターンで変えた事実:&#10;固有名詞:"
           ></textarea>
           <p class="help">今夜の進行。毎回APIに乗る。いつでも直せる。打ってる最中は自動上書きしない。</p>
           <div class="row-btns">
@@ -403,7 +403,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=31"></script>
+  <script type="module" src="./js/app.js?v=35"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -413,7 +413,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=31").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=35").catch(() => {});
       });
     }
   </script>
