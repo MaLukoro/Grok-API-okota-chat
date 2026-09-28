@@ -189,5 +189,6 @@ export function formatGenMeta(meta) {
   else if (meta.tokens_estimated && (meta.prompt_tokens || meta.completion_tokens)) {
     parts.push(`≈${(meta.prompt_tokens || 0) + (meta.completion_tokens || 0)}`);
   }
+  if (meta.image_tokens != null) parts.push(`img ${meta.image_tokens}`);
   return parts.join(" · ");
 }

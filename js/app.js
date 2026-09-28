@@ -1282,32 +1282,36 @@ async function readImageAttachment(file) {
     if (source.close) source.close();
     throw new Error("画像サイズが取れない");
   }
-  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(srcW, srcH));
-  const w = Math.max(1, Math.round(srcW * scale));
-  const h = Math.max(1, Math.round(srcH * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    if (source.close) source.close();
-    throw new Error("canvas が使えない");
+  // canvas の image/jpeg は API が画像トークンに数えない。通るのは image/png の data URL。
+  let edge = MAX_IMAGE_EDGE;
+  let dataUrl = "";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const scale = Math.min(1, edge / Math.max(srcW, srcH));
+    const w = Math.max(1, Math.round(srcW * scale));
+    const h = Math.max(1, Math.round(srcH * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      if (source.close) source.close();
+      throw new Error("canvas が使えない");
+    }
+    ctx.drawImage(source, 0, 0, w, h);
+    dataUrl = canvas.toDataURL("image/png");
+    if (dataUrl.startsWith("data:image/png;base64,iVBOR") && dataUrl.length <= 1.8 * 1024 * 1024) break;
+    edge = Math.round(edge * 0.75);
   }
-  ctx.drawImage(source, 0, 0, w, h);
   if (source.close) source.close();
-
-  const preferPng = (/png$/i.test(file.type) || /\.png$/i.test(file.name)) && w * h < 2_000_000;
-  let dataUrl = preferPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.84);
-  if (dataUrl.length > 1.8 * 1024 * 1024) dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-  if (dataUrl.length > 3.2 * 1024 * 1024) dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+  if (!dataUrl.startsWith("data:image/png;base64,iVBOR") || dataUrl.length < 64) {
+    throw new Error("画像の書き出しに失敗した");
+  }
   if (dataUrl.length > 4.5 * 1024 * 1024) throw new Error("圧縮しても大きい");
 
-  const mime = dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
-  const name = file.name || (mime === "image/png" ? "image.png" : "image.jpg");
   return {
     kind: "image",
-    name,
-    mime,
+    name: file.name || "image.png",
+    mime: "image/png",
     size: Math.round((dataUrl.length * 3) / 4),
     dataUrl,
   };
@@ -1546,6 +1550,7 @@ async function runGeneration() {
     assistant.content = result.content || assistant.content;
     const elapsed = Math.round(performance.now() - t0);
     const usage = result.usage || {};
+    const details = usage.prompt_tokens_details || usage.input_tokens_details || {};
     assistant.meta = {
       elapsed_ms: elapsed,
       model: result.model || settings().model,
@@ -1553,6 +1558,8 @@ async function runGeneration() {
       prompt_tokens: usage.prompt_tokens || usage.input_tokens || null,
       completion_tokens: usage.completion_tokens || usage.output_tokens || null,
       total_tokens: usage.total_tokens || null,
+      text_tokens: details.text_tokens ?? null,
+      image_tokens: details.image_tokens ?? null,
     };
     await persistCurrent();
     renderMessages();

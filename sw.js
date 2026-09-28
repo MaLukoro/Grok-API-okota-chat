@@ -1,4 +1,4 @@
-const CACHE = "kotatsu-v35";
+const CACHE = "kotatsu-v36";
 const ASSETS = [
   "./",
   "./index.html",
@@ -10,7 +10,7 @@ const ASSETS = [
   "./icons/favicon-64.png",
   "./icons/grik.png",
   "./icons/maro.png",
-  "./js/app.js?v=35",
+  "./js/app.js?v=36",
   "./js/util.js",
   "./js/settings.js",
   "./js/db.js",
