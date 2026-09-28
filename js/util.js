@@ -142,6 +142,43 @@ export function downloadJson(filename, data) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+/** <think> を本文から剥がす。閉じタグが無い途中も思考側へ寄せる。 */
+export function peelThinkTags(text) {
+  const reasons = [];
+  let rest = String(text ?? "");
+  rest = rest.replace(/<(think|thinking)>([\s\S]*?)<\/\1>/gi, (_all, _tag, inner) => {
+    const t = String(inner || "").trim();
+    if (t) reasons.push(t);
+    return "";
+  });
+  const open = /<(think|thinking)>([\s\S]*)$/i.exec(rest);
+  if (open) {
+    const t = String(open[2] || "").trim();
+    if (t) reasons.push(t);
+    rest = rest.slice(0, open.index);
+  }
+  return { reasoning: reasons.join("\n\n"), content: rest.trim() };
+}
+
+export function stripReasoningPrefix(content, reasoning) {
+  const text = String(content ?? "");
+  const reason = String(reasoning ?? "").trim();
+  if (!reason || !text.trim()) return text.trim();
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith(reason)) return trimmed.slice(reason.length).trim();
+  return text.trim();
+}
+
+/** 保存済みの reasoning と、本文に混ざった think タグを表示用に分ける。 */
+export function splitReasoningView(content, reasoning) {
+  const peeled = peelThinkTags(content);
+  const reason = [reasoning, peeled.reasoning]
+    .map((s) => String(s || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  return { reasoning: reason, content: stripReasoningPrefix(peeled.content, reason) };
+}
+
 export function contentAsText(content) {
   if (content == null) return "";
   if (typeof content === "string") return content;

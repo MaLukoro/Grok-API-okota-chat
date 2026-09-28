@@ -16,6 +16,7 @@ import {
   prefersNewlineOnEnter,
   relativeTime,
   renderSoftMarkdown,
+  splitReasoningView,
   toast,
 } from "./util.js";
 import { FALLBACK_MODELS, VOICES, loadSettings, maskKey, saveSettings } from "./settings.js";
@@ -34,7 +35,7 @@ import {
   saveFile,
   saveProject,
 } from "./db.js";
-import { chatComplete, chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=37";
+import { chatComplete, chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=38";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import {
   CHUNK_CHARS,
@@ -928,7 +929,11 @@ function renderMessages({ scroll = true } = {}) {
     .map((m, i) => {
       const role = m.role === "user" ? "user" : m.role === "assistant" ? "assistant" : "system";
       if (role === "system") return "";
-      const body = renderSoftMarkdown(contentAsText(m.content));
+      const view = role === "assistant" ? splitReasoningView(contentAsText(m.content), m.reasoning) : { content: contentAsText(m.content), reasoning: "" };
+      const body = renderSoftMarkdown(view.content);
+      const reasonHtml = view.reasoning
+        ? `<details class="msg-reason"><summary>思考</summary><div class="msg-reason-body">${escapeHtml(view.reasoning)}</div></details>`
+        : "";
       const atts = renderAttachmentsHtml(m);
       const rag = m.rag
         ? m.rag.rag_enabled === false
@@ -965,14 +970,14 @@ function renderMessages({ scroll = true } = {}) {
             </div>`;
       const bodyHtml = body
         ? `<div class="msg-body">${body}</div>`
-        : atts
+        : atts || reasonHtml
           ? ""
           : `<div class="msg-body"><span class="muted">（空）</span></div>`;
       return `<article class="msg ${role}" data-i="${i}">
         ${avatarImg(role)}
         <div class="msg-card">
           <div class="msg-role">${role === "user" ? "まろ" : "グリク"}</div>
-          ${atts}${bodyHtml}
+          ${atts}${reasonHtml}${bodyHtml}
           ${rag}${meta}${actions}
         </div>
       </article>`;
@@ -1453,6 +1458,49 @@ async function commitEditUser(i) {
   await runGeneration();
 }
 
+function paintAssistantStream(view) {
+  const card = document.querySelector("#messages .msg.assistant:last-child .msg-card");
+  if (!card) {
+    renderMessages();
+    return;
+  }
+  let reason = card.querySelector(".msg-reason");
+  if (view.reasoning) {
+    if (!reason) {
+      reason = document.createElement("details");
+      reason.className = "msg-reason";
+      reason.innerHTML = `<summary>思考</summary><div class="msg-reason-body"></div>`;
+      const body = card.querySelector(".msg-body");
+      if (body) card.insertBefore(reason, body);
+      else card.appendChild(reason);
+    }
+    if (!view.content) {
+      reason.open = true;
+      reason.dataset.auto = "1";
+    } else if (reason.dataset.auto === "1") {
+      reason.open = false;
+      delete reason.dataset.auto;
+    }
+    const pre = reason.querySelector(".msg-reason-body");
+    if (pre) pre.textContent = view.reasoning;
+  }
+  let body = card.querySelector(".msg-body");
+  if (!view.content && view.reasoning && body) {
+    body.remove();
+    body = null;
+  }
+  if (view.content) {
+    if (!body) {
+      body = document.createElement("div");
+      body.className = "msg-body";
+      card.appendChild(body);
+    }
+    body.innerHTML = renderSoftMarkdown(view.content);
+  } else if (body && !view.reasoning) {
+    body.innerHTML = `<span class="muted">（空）</span>`;
+  }
+}
+
 async function runGeneration() {
   const chat = state.current;
   if (!chat) return;
@@ -1538,17 +1586,19 @@ async function runGeneration() {
       },
       {
         signal: ac.signal,
-        onDelta: (full) => {
-          assistant.content = full;
-          const last = $("#messages .msg.assistant:last-child .msg-body");
-          if (last) last.innerHTML = renderSoftMarkdown(full);
-          else renderMessages();
+        onDelta: (full, reason) => {
+          const view = splitReasoningView(full, reason);
+          assistant.content = view.content;
+          assistant.reasoning = view.reasoning;
+          paintAssistantStream(view);
           const box = $("#messages");
           box.scrollTop = box.scrollHeight;
         },
       }
     );
-    assistant.content = result.content || assistant.content;
+    const doneView = splitReasoningView(result.content || assistant.content, result.reasoning || assistant.reasoning);
+    assistant.content = doneView.content;
+    assistant.reasoning = doneView.reasoning;
     const elapsed = Math.round(performance.now() - t0);
     const usage = result.usage || {};
     const details = usage.prompt_tokens_details || usage.input_tokens_details || {};

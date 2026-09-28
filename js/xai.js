@@ -75,10 +75,17 @@ export async function listModels(settings, { allowFallback = true } = {}) {
 
 function extractDelta(json) {
   const delta = json.choices?.[0]?.delta || {};
+  const hasDelta = delta.content || delta.reasoning_content || delta.reasoning;
+  if (hasDelta) {
+    return {
+      content: delta.content || "",
+      reasoning: delta.reasoning_content || delta.reasoning || "",
+    };
+  }
   const msg = json.choices?.[0]?.message || {};
   return {
-    content: delta.content || msg.content || "",
-    reasoning: delta.reasoning_content || delta.reasoning || msg.reasoning_content || msg.reasoning || "",
+    content: msg.content || "",
+    reasoning: msg.reasoning_content || msg.reasoning || "",
   };
 }
 
@@ -138,16 +145,12 @@ export async function chatCompletionsStream(settings, body, { signal, onDelta } 
       if (json.model && !resolvedModel) resolvedModel = json.model;
       if (!json.choices) continue;
       const { content, reasoning } = extractDelta(json);
-      if (content && reasoning && content === reasoning) {
-        fullReason += reasoning;
-      } else {
-        if (reasoning) fullReason += reasoning;
-        if (content) {
-          if (!fullReason || !fullReason.endsWith(content) || full) {
-            if (!reasoning) full += content;
-            else if (content !== reasoning) full += content;
-          }
-        }
+      if (reasoning) fullReason += reasoning;
+      if (content && content !== reasoning) {
+        if (!full && fullReason && content.startsWith(fullReason)) full += content.slice(fullReason.length);
+        else if (!full && fullReason && fullReason.endsWith(content)) {
+          /* 思考のやり直し。本文には足さない */
+        } else full += content;
       }
       if ((content || reasoning) && onDelta) onDelta(full, fullReason);
     }
@@ -214,6 +217,7 @@ export async function responsesStream(settings, body, { signal, onDelta } = {}) 
   const decoder = new TextDecoder();
   let buffer = "";
   let full = "";
+  let fullReason = "";
   let usage = null;
   let resolvedModel = null;
   let finished = false;
@@ -236,24 +240,34 @@ export async function responsesStream(settings, body, { signal, onDelta } = {}) 
       } catch {
         continue;
       }
-      if (json.type === "response.output_text.delta" && json.delta) {
+      const isReason = typeof json.type === "string" && json.type.includes("reasoning");
+      if (isReason && typeof json.delta === "string") {
+        fullReason += json.delta;
+        if (onDelta) onDelta(full, fullReason);
+      } else if (json.type === "response.output_text.delta" && json.delta) {
         full += json.delta;
-        if (onDelta) onDelta(full, "");
-      } else if (json.type === "response.output_item.delta" && json.delta?.text) {
+        if (onDelta) onDelta(full, fullReason);
+      } else if (json.type === "response.output_item.delta" && json.delta?.text && !isReason) {
         full += json.delta.text;
-        if (onDelta) onDelta(full, "");
-      } else if (typeof json.delta === "string" && json.type?.includes("text")) {
+        if (onDelta) onDelta(full, fullReason);
+      } else if (typeof json.delta === "string" && json.type?.includes("text") && !isReason) {
         full += json.delta;
-        if (onDelta) onDelta(full, "");
+        if (onDelta) onDelta(full, fullReason);
       }
       if (json.response?.usage) usage = json.response.usage;
       if (json.usage) usage = json.usage;
       if (json.response?.model) resolvedModel = json.response.model;
       if (json.type === "response.completed") {
-        if (!full) {
+        if (!full || !fullReason) {
           for (const item of json.response?.output || []) {
-            for (const c of item.content || []) {
-              if (typeof c.text === "string") full += c.text;
+            const itemReason = typeof item.type === "string" && item.type.includes("reasoning");
+            for (const c of item.content || item.summary || []) {
+              const text = typeof c.text === "string" ? c.text : typeof c === "string" ? c : "";
+              if (!text) continue;
+              const partReason = itemReason || (typeof c.type === "string" && c.type.includes("reasoning"));
+              if (partReason) {
+                if (!fullReason) fullReason += text;
+              } else if (!full) full += text;
             }
           }
         }
@@ -273,7 +287,7 @@ export async function responsesStream(settings, body, { signal, onDelta } = {}) 
       /* already closed */
     }
   }
-  return { content: full, reasoning: "", usage, model: resolvedModel || body.model };
+  return { content: full, reasoning: fullReason, usage, model: resolvedModel || body.model };
 }
 
 export async function chatStream(settings, body, opts) {
