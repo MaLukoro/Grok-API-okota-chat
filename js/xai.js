@@ -161,6 +161,28 @@ export async function chatCompletionsStream(settings, body, { signal, onDelta } 
   };
 }
 
+/** 画像つき配列を Responses の input_image にする。JSON 文字列にすると base64 が文字トークンになる。 */
+function toResponsesInputContent(content) {
+  if (typeof content === "string" || content == null) return content ?? "";
+  if (!Array.isArray(content)) return String(content);
+  const parts = [];
+  for (const p of content) {
+    if (!p || typeof p !== "object") continue;
+    const rawUrl = p.image_url?.url || (p.type === "image_url" && p.url);
+    const url = typeof rawUrl === "string" ? rawUrl : typeof p.image_url === "string" ? p.image_url : "";
+    if (url) {
+      parts.push({
+        type: "input_image",
+        image_url: url,
+        detail: p.image_url?.detail || p.detail || "high",
+      });
+      continue;
+    }
+    if (typeof p.text === "string" && p.text) parts.push({ type: "input_text", text: p.text });
+  }
+  return parts.length ? parts : "";
+}
+
 /** Web検索トグル時。Responses API。失敗したら呼び出し側で completions に落とす。 */
 export async function responsesStream(settings, body, { signal, onDelta } = {}) {
   const url = `${resolveApiBase(settings)}/responses`;
@@ -168,7 +190,7 @@ export async function responsesStream(settings, body, { signal, onDelta } = {}) 
     .filter((m) => m.role !== "system")
     .map((m) => ({
       role: m.role === "assistant" ? "assistant" : "user",
-      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      content: toResponsesInputContent(m.content),
     }));
   const sys = (body.messages || []).filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
   const payload = {
@@ -194,8 +216,10 @@ export async function responsesStream(settings, body, { signal, onDelta } = {}) 
   let full = "";
   let usage = null;
   let resolvedModel = null;
+  let finished = false;
 
-  while (true) {
+  try {
+  while (!finished) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -223,7 +247,30 @@ export async function responsesStream(settings, body, { signal, onDelta } = {}) 
         if (onDelta) onDelta(full, "");
       }
       if (json.response?.usage) usage = json.response.usage;
+      if (json.usage) usage = json.usage;
       if (json.response?.model) resolvedModel = json.response.model;
+      if (json.type === "response.completed") {
+        if (!full) {
+          for (const item of json.response?.output || []) {
+            for (const c of item.content || []) {
+              if (typeof c.text === "string") full += c.text;
+            }
+          }
+        }
+        finished = true;
+        break;
+      }
+      if (json.type === "response.failed" || json.type === "error") {
+        const msg = json.response?.error?.message || json.error?.message || json.message || "検索つき応答が失敗した";
+        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      }
+    }
+  }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
     }
   }
   return { content: full, reasoning: "", usage, model: resolvedModel || body.model };

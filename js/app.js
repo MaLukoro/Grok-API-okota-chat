@@ -34,7 +34,7 @@ import {
   saveFile,
   saveProject,
 } from "./db.js";
-import { chatComplete, chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=30";
+import { chatComplete, chatStream, fetchCreditBalance, formatUsd, listModels, sanitizeApiKey } from "./xai.js?v=37";
 import { ragMetaFrom, retrieveFromFiles } from "./rag.js";
 import {
   CHUNK_CHARS,
@@ -105,6 +105,7 @@ const MAX_ATTACH = 6;
 const MAX_MD_BYTES = 512 * 1024;
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_IMAGE_EDGE = 1600;
+const MAX_IMAGE_DATA_URL = 600 * 1024;
 const MAX_API_IMAGES = 6;
 
 function settings() {
@@ -1285,7 +1286,7 @@ async function readImageAttachment(file) {
   // canvas の image/jpeg は API が画像トークンに数えない。通るのは image/png の data URL。
   let edge = MAX_IMAGE_EDGE;
   let dataUrl = "";
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     const scale = Math.min(1, edge / Math.max(srcW, srcH));
     const w = Math.max(1, Math.round(srcW * scale));
     const h = Math.max(1, Math.round(srcH * scale));
@@ -1299,14 +1300,14 @@ async function readImageAttachment(file) {
     }
     ctx.drawImage(source, 0, 0, w, h);
     dataUrl = canvas.toDataURL("image/png");
-    if (dataUrl.startsWith("data:image/png;base64,iVBOR") && dataUrl.length <= 1.8 * 1024 * 1024) break;
-    edge = Math.round(edge * 0.75);
+    if (dataUrl.startsWith("data:image/png;base64,iVBOR") && dataUrl.length <= MAX_IMAGE_DATA_URL) break;
+    edge = Math.round(edge * 0.72);
   }
   if (source.close) source.close();
   if (!dataUrl.startsWith("data:image/png;base64,iVBOR") || dataUrl.length < 64) {
     throw new Error("画像の書き出しに失敗した");
   }
-  if (dataUrl.length > 4.5 * 1024 * 1024) throw new Error("圧縮しても大きい");
+  if (dataUrl.length > MAX_IMAGE_DATA_URL) throw new Error("圧縮しても大きい");
 
   return {
     kind: "image",
