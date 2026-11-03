@@ -5,6 +5,7 @@ import {
   contentAsText,
   defaultTitle,
   downloadJson,
+  downloadText,
   escapeAttr,
   escapeHtml,
   firstLine,
@@ -18,7 +19,7 @@ import {
   renderSoftMarkdown,
   splitReasoningView,
   toast,
-} from "./util.js";
+} from "./util.js?v=39";
 import { FALLBACK_MODELS, VOICES, loadSettings, maskKey, saveSettings } from "./settings.js";
 import {
   deleteChat,
@@ -63,7 +64,7 @@ import {
   windowStats,
 } from "./memory.js?v=34";
 import { geminiGenerateText, isGeminiSafetyError, sanitizeGeminiKey } from "./gemini.js?v=35";
-import { normalizeImportPayload, toExportChat, toStudioChat } from "./importChat.js";
+import { normalizeImportPayload, toExportChat, toExportMarkdown, toStudioChat } from "./importChat.js?v=39";
 import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
 import {
@@ -1962,14 +1963,30 @@ async function importFromFile(file) {
   await importPayload(data, { fallbackTitle: file.name.replace(/\.json$/i, ""), newId: true });
 }
 
-function exportCurrent() {
+function chatExportBasename(chat) {
+  return (chat?.title || "chat").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || "chat";
+}
+
+function toggleExportMenu(force) {
+  const menu = $("#export-menu");
+  const btn = $("#btn-export-chat");
+  if (!menu || !btn) return;
+  const hide = force === false ? true : force === true ? false : !menu.hidden;
+  menu.hidden = hide;
+  btn.setAttribute("aria-expanded", hide ? "false" : "true");
+}
+
+function exportCurrent(format = "json") {
   if (!state.current) {
     toast("書き出す会話がない", "error");
     return;
   }
-  const data = toExportChat(state.current);
-  const safe = (data.title || "chat").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
-  downloadJson(`${safe}.json`, data);
+  const safe = chatExportBasename(state.current);
+  if (format === "md") {
+    downloadText(`${safe}.md`, toExportMarkdown(state.current), "text/markdown;charset=utf-8");
+    return;
+  }
+  downloadJson(`${safe}.json`, toExportChat(state.current));
 }
 
 async function addProjectFiles(fileList) {
@@ -2097,7 +2114,17 @@ function bind() {
       toast(String(err.message || err), "error");
     }
   });
-  $("#btn-export-chat").addEventListener("click", exportCurrent);
+  $("#btn-export-chat").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleExportMenu();
+  });
+  $("#export-menu")?.addEventListener("click", (e) => {
+    const item = e.target.closest("[data-export]");
+    if (!item) return;
+    e.stopPropagation();
+    toggleExportMenu(false);
+    exportCurrent(item.dataset.export);
+  });
 
   $("#btn-add-files").addEventListener("click", () => $("#project-file-input").click());
   $("#project-file-input").addEventListener("change", async (e) => {
@@ -2168,10 +2195,13 @@ function bind() {
   });
   $("#att-zoom").addEventListener("click", closeAttZoom);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$("#att-zoom")?.hidden) {
+    if (e.key !== "Escape") return;
+    if (!$("#att-zoom")?.hidden) {
       e.preventDefault();
       closeAttZoom();
+      return;
     }
+    toggleExportMenu(false);
   });
 
   $("#btn-send").addEventListener("click", sendMessage);
@@ -2205,6 +2235,7 @@ function bind() {
   });
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#rag-source-bar")) toggleRagPop(false);
+    if (!e.target.closest(".export-wrap")) toggleExportMenu(false);
   });
 
   $("#btn-open-left").addEventListener("click", () => openDrawer("left"));

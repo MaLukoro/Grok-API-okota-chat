@@ -128,10 +128,8 @@ export function firstLine(text, max = 40) {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
-export function downloadJson(filename, data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: "application/json;charset=utf-8",
-  });
+export function downloadText(filename, text, mime = "text/plain;charset=utf-8") {
+  const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -140,6 +138,10 @@ export function downloadJson(filename, data) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+export function downloadJson(filename, data) {
+  downloadText(filename, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
 }
 
 /** <think> を本文から剥がす。閉じタグが無い途中も思考側へ寄せる。 */

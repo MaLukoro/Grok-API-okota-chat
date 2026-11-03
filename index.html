@@ -14,7 +14,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/favicon-64.png" type="image/png" sizes="64x64" />
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="./styles.css?v=38" />
+  <link rel="stylesheet" href="./styles.css?v=39" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -46,7 +46,13 @@
       <div class="chat-top-actions">
         <button id="btn-new-chat" class="btn primary sm chat-top-main" type="button">＋ チャット</button>
         <button id="btn-import-chat" class="btn ghost sm" type="button" title="JSONから続き再開">📂 再開</button>
-        <button id="btn-export-chat" class="btn ghost sm" type="button" title="この会話をJSONで書き出し">⬇</button>
+        <div class="export-wrap">
+          <button id="btn-export-chat" class="btn ghost sm" type="button" title="この会話を書き出し" aria-haspopup="menu" aria-expanded="false">⬇</button>
+          <div id="export-menu" class="export-menu" hidden role="menu">
+            <button type="button" class="btn ghost sm export-item" data-export="json" role="menuitem">JSON</button>
+            <button type="button" class="btn ghost sm export-item" data-export="md" role="menuitem">Markdown</button>
+          </div>
+        </div>
         <input id="import-file" type="file" accept=".json,application/json" hidden />
       </div>
 
@@ -403,7 +409,7 @@
   <div id="att-zoom" class="att-zoom" hidden>
     <img id="att-zoom-img" alt="" />
   </div>
-  <script type="module" src="./js/app.js?v=38"></script>
+  <script type="module" src="./js/app.js?v=39"></script>
   <script>
     if ("serviceWorker" in navigator) {
       let swRefreshing = false;
@@ -413,7 +419,7 @@
         location.reload();
       });
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js?v=38").catch(() => {});
+        navigator.serviceWorker.register("./sw.js?v=39").catch(() => {});
       });
     }
   </script>

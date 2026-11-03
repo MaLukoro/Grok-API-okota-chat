@@ -1,6 +1,6 @@
 /** Local LLM Studio チャットJSONとの互換インポート。 */
 
-import { makeId, nowSec } from "./util.js";
+import { makeId, nowSec, splitReasoningView } from "./util.js?v=39";
 
 const ROLE_MAP = {
   user: "user",
@@ -114,4 +114,54 @@ export function toExportChat(chat) {
         return out;
       }),
   };
+}
+
+function fenceBlock(lang, text) {
+  const body = String(text ?? "").replace(/\r\n/g, "\n");
+  let ticks = "```";
+  const runs = body.match(/`{3,}/g) || [];
+  for (const run of runs) {
+    if (run.length >= ticks.length) ticks = "`".repeat(run.length + 1);
+  }
+  return `${ticks}${lang || ""}\n${body}\n${ticks}`;
+}
+
+function formatAttachmentMd(a) {
+  if (!a || typeof a !== "object") return "";
+  const name = a.name || (a.kind === "image" ? "image" : "file");
+  if (a.kind === "md" && a.text) {
+    return `添付: ${name}\n\n${fenceBlock("markdown", a.text)}`;
+  }
+  if (a.kind === "image") return `（画像: ${name}）`;
+  return `（添付: ${name}）`;
+}
+
+/** 画面と同じ まろ / グリク の読み物。画像の data URL はファイル名だけ。 */
+export function toExportMarkdown(chat) {
+  const title = String(chat?.title || "無題").replace(/\s+/g, " ").trim() || "無題";
+  const chunks = [`# ${title}`];
+  if (chat?.model) chunks.push(`モデル: ${chat.model}`);
+  const sys = String(chat?.system_prompt || "").trim();
+  if (sys) {
+    chunks.push(`<details>\n<summary>システムプロンプト</summary>\n\n${sys}\n\n</details>`);
+  }
+  for (const m of chat?.messages || []) {
+    if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
+    const who = m.role === "user" ? "まろ" : "グリク";
+    const view =
+      m.role === "assistant"
+        ? splitReasoningView(normalizeContent(m.content), m.reasoning)
+        : { content: normalizeContent(m.content), reasoning: "" };
+    const parts = [`**${who}**`];
+    for (const a of m.attachments || []) {
+      const block = formatAttachmentMd(a);
+      if (block) parts.push(block);
+    }
+    if (view.reasoning) {
+      parts.push(`<details>\n<summary>思考</summary>\n\n${String(view.reasoning).trim()}\n\n</details>`);
+    }
+    parts.push(String(view.content || "").trim() || "（空）");
+    chunks.push(parts.join("\n\n"));
+  }
+  return chunks.join("\n\n").trimEnd() + "\n";
 }
