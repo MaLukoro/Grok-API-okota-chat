@@ -64,7 +64,7 @@ import {
   windowStats,
 } from "./memory.js?v=34";
 import { geminiGenerateText, isGeminiSafetyError, sanitizeGeminiKey } from "./gemini.js?v=35";
-import { normalizeImportPayload, toExportChat, toExportMarkdown, toStudioChat } from "./importChat.js?v=39";
+import { normalizeImportPayload, toExportChat, toExportMarkdown, toStudioChat } from "./importChat.js?v=40";
 import { speakText, stopSpeak } from "./tts.js";
 import { downloadBackup, supabaseSql, uploadBackup } from "./cloud.js";
 import {

@@ -104,7 +104,6 @@ export function toStudioChat(payload, { newId = true, projectId = undefined } = 
 export function toExportChat(chat) {
   return {
     title: chat.title || "無題",
-    system_prompt: chat.system_prompt || "",
     model: chat.model || null,
     messages: (chat.messages || [])
       .filter((m) => m && (m.role === "user" || m.role === "assistant"))
@@ -141,10 +140,6 @@ export function toExportMarkdown(chat) {
   const title = String(chat?.title || "無題").replace(/\s+/g, " ").trim() || "無題";
   const chunks = [`# ${title}`];
   if (chat?.model) chunks.push(`モデル: ${chat.model}`);
-  const sys = String(chat?.system_prompt || "").trim();
-  if (sys) {
-    chunks.push(`<details>\n<summary>システムプロンプト</summary>\n\n${sys}\n\n</details>`);
-  }
   for (const m of chat?.messages || []) {
     if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
     const who = m.role === "user" ? "まろ" : "グリク";
